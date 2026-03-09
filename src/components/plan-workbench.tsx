@@ -88,10 +88,10 @@ export function PlanWorkbench({
         <div className="mb-4 flex items-center justify-between">
           <div>
             <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--color-muted)]">
-              Plan review
+              Plan outline
             </p>
             <h3 className="mt-2 text-xl font-semibold text-[var(--color-ink)]">
-              Blueprint hierarchy
+              Project structure
             </h3>
           </div>
           <GitBranchPlus className="h-5 w-5 text-[var(--color-accent)]" />
@@ -106,7 +106,7 @@ export function PlanWorkbench({
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="space-y-3">
             <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--color-muted)]">
-              Selected item
+              Selected step
             </p>
             <div className="flex flex-wrap items-center gap-2">
               <StatusPill status={selectedItem.status} />
@@ -211,10 +211,10 @@ export function PlanWorkbench({
         <div className="space-y-4">
           <div>
             <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--color-muted)]">
-              Risks and ambiguities
+              Planner notes
             </p>
             <h3 className="mt-2 text-xl font-semibold text-[var(--color-ink)]">
-              What the planner inferred and injected
+              What Overture added or inferred
             </h3>
           </div>
 

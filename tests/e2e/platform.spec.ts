@@ -3,13 +3,13 @@ import { expect, test } from "@playwright/test";
 test("creates a project and loads the project dashboard", async ({ page }) => {
   await page.goto("/");
   await expect(
-    page.getByRole("heading", { name: /Compile a deep research blueprint/i }),
+    page.getByRole("heading", { name: /Build a project from a written plan/i }),
   ).toBeVisible();
 
   const projectName = `E2E Project ${Date.now()}`;
   await page.getByLabel("Project name").fill(projectName);
   await page.getByLabel("Repo source").fill(".");
-  await page.getByRole("textbox").last().fill(`# Example blueprint
+  await page.getByLabel("Plan content").fill(`# Example blueprint
 
 **20) MVP scope**
 - audit trail
@@ -19,7 +19,7 @@ Milestone A: Platform skeleton
 - Control plane API + UI scaffolding
 `);
 
-  await page.getByRole("button", { name: /Compile execution graph/i }).click();
+  await page.getByRole("button", { name: /Create project/i }).click();
   await page.waitForURL(/\/projects\//);
   await expect(page.getByRole("heading", { name: projectName })).toBeVisible();
 

@@ -3,6 +3,29 @@ import { getDatabasePath } from "@/lib/server/storage";
 
 let dbInstance: Database.Database | null = null;
 
+function existingColumns(db: Database.Database, table: string) {
+  const rows = db
+    .prepare(`PRAGMA table_info(${table})`)
+    .all() as Array<{ name: string }>;
+
+  return new Set(rows.map((row) => row.name));
+}
+
+function ensureColumn(
+  db: Database.Database,
+  table: string,
+  column: string,
+  definition: string,
+) {
+  const columns = existingColumns(db, table);
+
+  if (columns.has(column)) {
+    return;
+  }
+
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+}
+
 function runMigrations(db: Database.Database) {
   db.exec(`
     PRAGMA journal_mode = WAL;
@@ -14,6 +37,11 @@ function runMigrations(db: Database.Database) {
       name TEXT NOT NULL,
       repo_source TEXT NOT NULL,
       execution_mode TEXT NOT NULL,
+      planner_model TEXT,
+      execution_model TEXT,
+      planner_reasoning_effort TEXT NOT NULL DEFAULT 'low',
+      symphony_max_concurrent_agents INTEGER NOT NULL DEFAULT 2,
+      symphony_max_turns INTEGER NOT NULL DEFAULT 24,
       status TEXT NOT NULL,
       health TEXT NOT NULL,
       qa_strictness INTEGER NOT NULL,
@@ -22,6 +50,21 @@ function runMigrations(db: Database.Database) {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       last_activity_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS app_settings (
+      id TEXT PRIMARY KEY,
+      planner_model TEXT,
+      execution_model TEXT,
+      planner_reasoning_effort TEXT NOT NULL,
+      default_execution_mode TEXT NOT NULL,
+      default_repo_source TEXT NOT NULL,
+      default_qa_strictness INTEGER NOT NULL,
+      default_security_strictness INTEGER NOT NULL,
+      symphony_max_concurrent_agents INTEGER NOT NULL,
+      symphony_max_turns INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS spec_documents (
@@ -166,6 +209,22 @@ function runMigrations(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_findings_project_category ON findings(project_id, category, severity);
     CREATE INDEX IF NOT EXISTS idx_audit_events_project_created ON audit_events(project_id, created_at DESC);
   `);
+
+  ensureColumn(db, "projects", "planner_model", "TEXT");
+  ensureColumn(db, "projects", "execution_model", "TEXT");
+  ensureColumn(
+    db,
+    "projects",
+    "planner_reasoning_effort",
+    "TEXT NOT NULL DEFAULT 'low'",
+  );
+  ensureColumn(
+    db,
+    "projects",
+    "symphony_max_concurrent_agents",
+    "INTEGER NOT NULL DEFAULT 2",
+  );
+  ensureColumn(db, "projects", "symphony_max_turns", "INTEGER NOT NULL DEFAULT 24");
 }
 
 export function getDb() {

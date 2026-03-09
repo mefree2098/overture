@@ -75,12 +75,22 @@ describe("repository lifecycle", () => {
       name: "Delete Me",
       repoSource: ".",
       executionMode: "local_chatgpt",
+      plannerModel: "planner-x",
+      executionModel: "executor-y",
+      plannerReasoningEffort: "medium",
+      symphonyMaxConcurrentAgents: 3,
+      symphonyMaxTurns: 30,
       specFilename: "plan.md",
       specText: "# Blueprint\n\n## Core lifecycle\n- Create and delete projects cleanly",
     });
 
     const snapshotBeforeDelete = repository.getProjectSnapshot(created.projectId);
     expect(snapshotBeforeDelete?.project.slug).toBe(created.slug);
+    expect(snapshotBeforeDelete?.project.plannerModel).toBe("planner-x");
+    expect(snapshotBeforeDelete?.project.executionModel).toBe("executor-y");
+    expect(snapshotBeforeDelete?.project.plannerReasoningEffort).toBe("medium");
+    expect(snapshotBeforeDelete?.project.symphonyMaxConcurrentAgents).toBe(3);
+    expect(snapshotBeforeDelete?.project.symphonyMaxTurns).toBe(30);
 
     const {
       projectRoot,

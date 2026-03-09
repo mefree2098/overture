@@ -63,3 +63,15 @@ export const DEFAULT_POLICY_PROFILE = {
   securityStrictness: 4,
   deploymentTargets: [...DEPLOYMENT_TARGETS],
 };
+
+export const DEFAULT_APP_SETTINGS = {
+  plannerModel: null,
+  executionModel: null,
+  plannerReasoningEffort: "low",
+  defaultExecutionMode: "local_chatgpt",
+  defaultRepoSource: ".",
+  defaultQaStrictness: 4,
+  defaultSecurityStrictness: 4,
+  symphonyMaxConcurrentAgents: 2,
+  symphonyMaxTurns: 24,
+} as const;

@@ -1,4 +1,5 @@
 import type {
+  DEFAULT_APP_SETTINGS,
   DEFAULT_POLICY_PROFILE,
   DEPLOYMENT_TARGETS,
   FINDING_SEVERITIES,
@@ -20,6 +21,7 @@ export type DeploymentTarget = (typeof DEPLOYMENT_TARGETS)[number];
 export type TrackerStateName = (typeof TRACKER_STATE_NAMES)[number];
 export type ExecutionMode = "local_chatgpt" | "hosted_api";
 export type GateVerdict = "pass" | "fail" | "pending" | "waived" | "partial";
+export type PlannerReasoningEffort = "low" | "medium" | "high";
 
 export interface PolicyProfile {
   qaStrictness: number;
@@ -105,6 +107,11 @@ export interface ProjectRecord {
   name: string;
   repoSource: string;
   executionMode: ExecutionMode;
+  plannerModel: string | null;
+  executionModel: string | null;
+  plannerReasoningEffort: PlannerReasoningEffort;
+  symphonyMaxConcurrentAgents: number;
+  symphonyMaxTurns: number;
   status: string;
   health: "on_track" | "at_risk" | "blocked";
   qaStrictness: number;
@@ -291,6 +298,26 @@ export interface CreateProjectInput {
   repoSource: string;
   executionMode: ExecutionMode;
   policyProfile?: Partial<typeof DEFAULT_POLICY_PROFILE>;
+  plannerModel?: string | null;
+  executionModel?: string | null;
+  plannerReasoningEffort?: PlannerReasoningEffort;
+  symphonyMaxConcurrentAgents?: number;
+  symphonyMaxTurns?: number;
   specText: string;
   specFilename: string;
+}
+
+export interface AppSettingsRecord {
+  plannerModel: string | null;
+  executionModel: string | null;
+  plannerReasoningEffort: PlannerReasoningEffort;
+  defaultExecutionMode: ExecutionMode;
+  defaultRepoSource: string;
+  defaultQaStrictness: number;
+  defaultSecurityStrictness: number;
+  symphonyMaxConcurrentAgents: number;
+  symphonyMaxTurns: number;
+  createdAt: string;
+  updatedAt: string;
+  defaults: typeof DEFAULT_APP_SETTINGS;
 }

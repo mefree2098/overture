@@ -6,7 +6,7 @@
 
 Overture is a local-first AI delivery control plane. It takes a deep-research markdown blueprint, runs a real Codex planning pass to turn that document into milestones, epics, and execution tickets, mirrors that graph through a Linear-compatible tracker surface, and launches Symphony as the autonomous execution runtime.
 
-The current app is a working Next.js control plane with SQLite persistence, real LLM-backed plan ingestion, vendored Symphony orchestration, artifact storage, gate tracking, runtime observability, and project deletion.
+The current app is a working Next.js control plane with SQLite persistence, real LLM-backed plan ingestion, vendored Symphony orchestration, artifact storage, gate tracking, runtime observability, project deletion, and a settings area for model/runtime defaults.
 
 ## What the platform does
 
@@ -18,6 +18,7 @@ The current app is a working Next.js control plane with SQLite persistence, real
 - Launches Symphony against a per-project workflow contract
 - Tracks gate readiness, runtime state, artifacts, findings, and audit history in the UI
 - Supports hard deletion of failed or stale projects from the dashboard and project page
+- Lets users choose planner and execution model defaults in `/settings`, with per-project overrides available in the intake flow
 
 ## Runtime model
 
@@ -26,7 +27,13 @@ There are two supported execution modes:
 - `local_chatgpt`: uses the local Codex runtime already authenticated on the machine running Overture
 - `hosted_api`: uses Codex with `OPENAI_API_KEY`
 
-The automated local container deployment now includes the Codex CLI, `git`, the Elixir runtime required by Symphony, and startup auth bootstrapping. On container startup, Overture copies the host machine's ChatGPT-backed Codex auth into the container's persisted `CODEX_HOME` under the platform runtime root so live planning and execution work without an extra login step.
+The automated local container deployment includes the Codex CLI, `git`, the Elixir runtime required by Symphony, and startup auth bootstrapping. On container startup, Overture copies the host machine's ChatGPT-backed Codex auth into the container's persisted `CODEX_HOME` under the platform runtime root so live planning and execution work without an extra login step.
+
+Model selection works like this:
+
+- If you leave the planner or execution model blank, Overture lets the Codex CLI choose its default model
+- If you want explicit control, set default model names in `/settings`
+- If one project needs different model choices, open `Advanced project options` in the intake form and override them there
 
 ## Stack
 
@@ -112,6 +119,20 @@ npm run start
 
 This remains the simplest path for real project creation and execution when you want to use local ChatGPT-backed Codex auth.
 
+## Settings and model control
+
+Open `/settings` in the UI to control:
+
+- Default planner model
+- Default execution model
+- Planner reasoning depth
+- Default execution mode
+- Default repository source
+- QA and security strictness defaults
+- Symphony parallelism and max-turn limits
+
+These settings apply to new projects only. Existing projects keep the planner/execution settings captured when they were created.
+
 ## Create and execute a project
 
 You can paste or upload a blueprint in the UI, or seed the sample `plan.md` from the command line:
@@ -134,10 +155,11 @@ For a fresh project run:
 
 1. Delete the old project from the home dashboard or project page if you want a clean slate.
 2. Open the intake form on `/`.
-3. Enter a new project name and repo source.
+3. Enter a project name and confirm the repo or folder.
 4. Paste or upload the next markdown blueprint.
-5. Click `Compile execution graph`.
-6. Open the new project page and click `Launch Symphony`.
+5. Optionally open `Advanced project options` if you want a different model or run mode for this one project.
+6. Click `Create project`.
+7. Open the new project page and click `Launch Symphony`.
 
 You can also create a project programmatically with `POST /api/projects` and then start execution with `POST /api/projects/:projectId/execute`.
 
@@ -186,10 +208,22 @@ npm audit --audit-level=high
 For a fast manual smoke after launching the app:
 
 1. Open `/`.
-2. Create or open a project.
-3. Verify `/api/health` returns `ok: true`.
-4. Launch Symphony from the project page.
-5. Confirm the runtime panel switches to `Runtime live`.
+2. If needed, open `/settings` and confirm the default model and run mode.
+3. Create or open a project.
+4. Confirm the overview page shows the captured planning/execution settings.
+5. Launch Symphony from the project page.
+6. Verify `/api/health` returns `ok: true`.
+7. Confirm the Runtime tab shows a live runtime or bootstrap log output.
+
+For a beginner end-to-end run in the UI:
+
+1. Open `/`.
+2. Enter a project name.
+3. Paste or upload a markdown plan.
+4. Click `Create project`.
+5. Review the `Overview` and `Plan` tabs.
+6. Click `Launch Symphony`.
+7. Use the `Runtime` tab for live progress and the `Evidence` tab for artifacts and audit history.
 
 ## Docker deployment
 
@@ -250,6 +284,8 @@ Default runtime directories:
 - `DELETE /api/projects/:projectId`: hard-delete a project
 - `GET /api/projects/:projectId/snapshot`: fetch the full project snapshot
 - `POST /api/projects/:projectId/execute`: launch or refresh Symphony for the project
+- `GET /api/settings`: read saved platform defaults
+- `PATCH /api/settings`: update saved platform defaults
 - `GET /api/artifacts/:artifactId`: stream a stored artifact
 - `POST /api/tracker/graphql`: Linear-compatible tracker shim
 

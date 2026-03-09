@@ -6,13 +6,13 @@ Overture can be packaged for Jetson as an `arm64` container, and the image now i
 
 - Target architecture: `linux/arm64`
 - Recommended NVIDIA stack: JetPack 6.1 or newer
-- Runtime model: standalone Next.js app plus local `.overture` state, real Codex-backed planning, automatic Codex auth bootstrap from `OPENAI_API_KEY`, and vendored Symphony execution
+- Runtime model: standalone Next.js app plus local `.overture` state, real Codex-backed planning, default `hosted_api` authentication via `OPENAI_API_KEY`, and vendored Symphony execution
 
 ## Required runtime prerequisites
 
 - Docker with `buildx`
 - Node 22 compatibility in the base image
-- `OPENAI_API_KEY` so the container can bootstrap Codex automatically on first start
+- `OPENAI_API_KEY` so the container can use hosted Codex auth on first start
 - Writable persistent storage for `/app/.overture`
 
 ## Suggested deployment flow
@@ -22,7 +22,8 @@ Overture can be packaged for Jetson as an `arm64` container, and the image now i
 3. Mount persistent state into `/app/.overture`.
 4. Start the app: `docker run --rm -p 3000:3000 --env-file .env -v $(pwd)/.overture:/app/.overture overture:jetson`
 5. Verify `GET /api/health`.
-6. Seed or create a project, then launch Symphony with `npm run runner -- <project-id>`.
+6. Open `/settings` if you want to change planner or execution model defaults.
+7. Seed or create a project, then launch Symphony with `npm run runner -- <project-id>`.
 
 ## What remains manual on real hardware
 

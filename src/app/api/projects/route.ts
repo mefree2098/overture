@@ -15,6 +15,11 @@ const projectSchema = z.object({
       securityStrictness: z.number().min(1).max(5).optional(),
     })
     .optional(),
+  plannerModel: z.string().max(120).nullable().optional(),
+  executionModel: z.string().max(120).nullable().optional(),
+  plannerReasoningEffort: z.enum(["low", "medium", "high"]).optional(),
+  symphonyMaxConcurrentAgents: z.number().int().min(1).max(8).optional(),
+  symphonyMaxTurns: z.number().int().min(4).max(80).optional(),
   specFilename: z.string().min(1).max(240),
   specText: z.string().min(20),
 });

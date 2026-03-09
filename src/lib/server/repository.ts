@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { DEFAULT_POLICY_PROFILE } from "@/lib/constants";
+import { getAppSettings } from "@/lib/server/app-settings";
 import { getDb } from "@/lib/server/db";
 import { buildSpecIrWithLlm } from "@/lib/server/llm-planner";
 import { generatePlanFromSpec } from "@/lib/server/plan-generator";
@@ -156,6 +157,20 @@ function hydrateProject(row: Record<string, unknown>): ProjectRecord {
     name: String(row.name),
     repoSource: String(row.repo_source),
     executionMode: row.execution_mode as ProjectRecord["executionMode"],
+    plannerModel:
+      typeof row.planner_model === "string" && row.planner_model.trim()
+        ? row.planner_model
+        : null,
+    executionModel:
+      typeof row.execution_model === "string" && row.execution_model.trim()
+        ? row.execution_model
+        : null,
+    plannerReasoningEffort:
+      row.planner_reasoning_effort === "medium" || row.planner_reasoning_effort === "high"
+        ? (row.planner_reasoning_effort as ProjectRecord["plannerReasoningEffort"])
+        : "low",
+    symphonyMaxConcurrentAgents: Number(row.symphony_max_concurrent_agents ?? 2),
+    symphonyMaxTurns: Number(row.symphony_max_turns ?? 24),
     status: String(row.status),
     health: row.health as ProjectRecord["health"],
     qaStrictness: Number(row.qa_strictness),
@@ -807,6 +822,7 @@ export async function deleteProject(projectId: string) {
 
 export async function createProjectFromSpec(input: CreateProjectInput) {
   const db = getDb();
+  const appSettings = getAppSettings();
   const projectId = randomUUID();
   const specDocumentId = randomUUID();
   const planVersionId = randomUUID();
@@ -826,11 +842,26 @@ export async function createProjectFromSpec(input: CreateProjectInput) {
     deploymentTargets:
       input.policyProfile?.deploymentTargets ?? DEFAULT_POLICY_PROFILE.deploymentTargets,
   };
+  const plannerModel =
+    input.plannerModel === undefined
+      ? appSettings.plannerModel
+      : input.plannerModel?.trim() || null;
+  const executionModel =
+    input.executionModel === undefined
+      ? appSettings.executionModel
+      : input.executionModel?.trim() || null;
+  const plannerReasoningEffort =
+    input.plannerReasoningEffort ?? appSettings.plannerReasoningEffort;
+  const symphonyMaxConcurrentAgents =
+    input.symphonyMaxConcurrentAgents ?? appSettings.symphonyMaxConcurrentAgents;
+  const symphonyMaxTurns = input.symphonyMaxTurns ?? appSettings.symphonyMaxTurns;
 
   const specIr = await buildSpecIrWithLlm({
     name: input.name,
     executionMode: input.executionMode,
     specText: input.specText,
+    plannerModel,
+    plannerReasoningEffort,
   });
   const plan = generatePlanFromSpec(specIr);
   const generatedIdMap = new Map(
@@ -851,6 +882,11 @@ export async function createProjectFromSpec(input: CreateProjectInput) {
       "",
       `Project: ${input.name}`,
       `Execution mode: ${input.executionMode}`,
+      `Planner model: ${plannerModel ?? "Codex default"}`,
+      `Execution model: ${executionModel ?? "Codex default"}`,
+      `Planner reasoning effort: ${plannerReasoningEffort}`,
+      `Symphony parallel agents: ${symphonyMaxConcurrentAgents}`,
+      `Symphony max turns: ${symphonyMaxTurns}`,
       "",
       "Rules:",
       "- Closure is blocked until QA, security, and deployment gates pass.",
@@ -864,8 +900,8 @@ export async function createProjectFromSpec(input: CreateProjectInput) {
     db.prepare(
       `
         INSERT INTO projects (
-          id, slug, name, repo_source, execution_mode, status, health, qa_strictness, security_strictness, deployment_targets_json, created_at, updated_at, last_activity_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          id, slug, name, repo_source, execution_mode, planner_model, execution_model, planner_reasoning_effort, symphony_max_concurrent_agents, symphony_max_turns, status, health, qa_strictness, security_strictness, deployment_targets_json, created_at, updated_at, last_activity_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
     ).run(
       projectId,
@@ -873,6 +909,11 @@ export async function createProjectFromSpec(input: CreateProjectInput) {
       input.name,
       repoSource,
       input.executionMode,
+      plannerModel,
+      executionModel,
+      plannerReasoningEffort,
+      symphonyMaxConcurrentAgents,
+      symphonyMaxTurns,
       "planned",
       "on_track",
       policyProfile.qaStrictness,
@@ -897,6 +938,11 @@ export async function createProjectFromSpec(input: CreateProjectInput) {
       serialise({
         repoSource,
         outline: specIr.outline,
+        plannerModel,
+        executionModel,
+        plannerReasoningEffort,
+        symphonyMaxConcurrentAgents,
+        symphonyMaxTurns,
       }),
       input.specText,
       timestamp,
@@ -1008,9 +1054,16 @@ export async function createProjectFromSpec(input: CreateProjectInput) {
       "## Workflow roots",
       `- Workspace root: ${workspaceRoot}`,
       `- Workflow contract: ${workflowPath}`,
+      `- Planner model: ${plannerModel ?? "Codex default"}`,
+      `- Execution model: ${executionModel ?? "Codex default"}`,
+      `- Planner reasoning effort: ${plannerReasoningEffort}`,
+      `- Symphony parallel agents: ${symphonyMaxConcurrentAgents}`,
+      `- Symphony max turns: ${symphonyMaxTurns}`,
     ].join("\n"),
     metadata: {
       workflowPath,
+      plannerModel,
+      executionModel,
     },
   });
 
@@ -1023,6 +1076,9 @@ export async function createProjectFromSpec(input: CreateProjectInput) {
       specDocumentId,
       planVersionId,
       slug,
+      plannerModel,
+      executionModel,
+      plannerReasoningEffort,
     },
   });
 

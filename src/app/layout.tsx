@@ -43,13 +43,13 @@ export default function RootLayout({
                   </span>
                   <span>
                     <span className="block font-mono text-[11px] uppercase tracking-[0.38em] text-[var(--color-accent)]">
-                      AI Delivery OS
+                      AI Project Runner
                     </span>
                     <span className="block holo-text text-2xl font-semibold text-[var(--color-ink)]">
-                      Overture Control Plane
+                      Overture
                     </span>
                     <span className="mt-1 block text-sm text-[var(--color-muted)]">
-                      Codex planning, Symphony execution, evidence-first delivery.
+                      Turn a written plan into a tracked, automated build and review run.
                     </span>
                   </span>
                 </Link>
@@ -57,13 +57,13 @@ export default function RootLayout({
               <div className="flex flex-col gap-3 md:items-end">
                 <div className="flex flex-wrap items-center gap-2 font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--color-muted)]">
                   <span className="rounded-full border border-[var(--color-border)] bg-white/4 px-4 py-2">
-                    Planner: LLM
+                    Planner: Codex
                   </span>
                   <span className="rounded-full border border-[var(--color-border)] bg-white/4 px-4 py-2">
                     Executor: Symphony
                   </span>
                   <span className="rounded-full border border-[var(--color-border)] bg-white/4 px-4 py-2">
-                    Tracker: GraphQL Bridge
+                    Tracking: Built in
                   </span>
                 </div>
                 <nav className="flex flex-wrap items-center gap-2 font-mono text-[12px] uppercase tracking-[0.22em] text-[var(--color-muted)]">
@@ -71,14 +71,14 @@ export default function RootLayout({
                     href="/"
                     className="rounded-full border border-[var(--color-border)] bg-white/6 px-4 py-2 transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
                   >
-                  Projects
+                    Projects
                   </Link>
-                  <a
-                    href="#operator-view"
+                  <Link
+                    href="/settings"
                     className="rounded-full border border-[var(--color-border)] bg-white/6 px-4 py-2 transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
                   >
-                    Operators
-                  </a>
+                    Settings
+                  </Link>
                 </nav>
               </div>
             </header>

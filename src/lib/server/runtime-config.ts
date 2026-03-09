@@ -114,12 +114,12 @@ export function codexCliAvailable() {
 }
 
 export function recommendedExecutionMode(): ExecutionMode {
-  if (hasHostedApiCodexAuth()) {
-    return "hosted_api";
-  }
-
   if (hasLocalCodexAuth()) {
     return "local_chatgpt";
+  }
+
+  if (hasHostedApiCodexAuth()) {
+    return "hosted_api";
   }
 
   return "hosted_api";

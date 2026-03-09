@@ -11,7 +11,12 @@ import {
   resolveCodexBin,
 } from "@/lib/server/runtime-config";
 import { buildSpecIr } from "@/lib/server/spec-parser";
-import type { CreateProjectInput, DeploymentTarget, SpecIR } from "@/lib/types";
+import type {
+  CreateProjectInput,
+  DeploymentTarget,
+  PlannerReasoningEffort,
+  SpecIR,
+} from "@/lib/types";
 
 const DEPLOYMENT_TARGETS = ["local", "jetson", "azure", "aws"] as const;
 
@@ -183,7 +188,10 @@ function buildPlannerPrompt(input: Pick<CreateProjectInput, "name" | "executionM
 }
 
 function runCodexPlanner(
-  input: Pick<CreateProjectInput, "name" | "executionMode" | "specText">,
+  input: Pick<
+    CreateProjectInput,
+    "name" | "executionMode" | "specText" | "plannerModel" | "plannerReasoningEffort"
+  >,
   schemaPath: string,
   resultPath: string,
 ) {
@@ -195,6 +203,10 @@ function runCodexPlanner(
       input.executionMode === "hosted_api"
         ? 'forced_login_method="api"'
         : 'forced_login_method="chatgpt"';
+    const reasoningEffort: PlannerReasoningEffort =
+      input.plannerReasoningEffort === "medium" || input.plannerReasoningEffort === "high"
+        ? input.plannerReasoningEffort
+        : "low";
     const args = [
       "exec",
       "--skip-git-repo-check",
@@ -206,7 +218,7 @@ function runCodexPlanner(
       "-c",
       forcedLoginMethodArg,
       "-c",
-      'model_reasoning_effort="low"',
+      `model_reasoning_effort="${reasoningEffort}"`,
       "--output-schema",
       schemaPath,
       "--output-last-message",
@@ -214,7 +226,8 @@ function runCodexPlanner(
       "--cd",
       getWorkspaceRoot(),
     ];
-    const model = process.env.OVERTURE_CODEX_MODEL?.trim();
+    const model =
+      input.plannerModel?.trim() || process.env.OVERTURE_CODEX_MODEL?.trim();
 
     if (model) {
       args.push("--model", model);
@@ -284,7 +297,10 @@ function runCodexPlanner(
 }
 
 export async function buildSpecIrWithLlm(
-  input: Pick<CreateProjectInput, "name" | "executionMode" | "specText">,
+  input: Pick<
+    CreateProjectInput,
+    "name" | "executionMode" | "specText" | "plannerModel" | "plannerReasoningEffort"
+  >,
 ): Promise<SpecIR> {
   if (!codexCliAvailable()) {
     throw new Error("Codex CLI is not installed or not available on PATH.");

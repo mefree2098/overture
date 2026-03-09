@@ -56,15 +56,16 @@ export function ProjectCard({ summary }: { summary: ProjectSummary }) {
               <FolderKanban className="h-4 w-4 text-[var(--color-accent)]" />
               <span className="font-mono text-[11px] uppercase tracking-[0.24em]">
                 {summary.project.executionMode === "local_chatgpt"
-                  ? "ChatGPT-linked Codex"
-                  : "API-backed Codex"}
+                  ? "Local ChatGPT Codex"
+                  : "Hosted API Codex"}
               </span>
             </div>
             <h3 className="holo-text text-3xl font-semibold text-[var(--color-ink)]">
               {summary.project.name}
             </h3>
             <p className="max-w-[24rem] text-sm leading-6 text-[var(--color-muted)]">
-              {summary.currentMilestone ?? "Execution fabric is primed and waiting for dispatch."}
+              {summary.currentMilestone ??
+                "Project created and ready for review or launch."}
             </p>
           </div>
           <Link
@@ -84,7 +85,7 @@ export function ProjectCard({ summary }: { summary: ProjectSummary }) {
       <div className="mt-6 grid grid-cols-2 gap-4 text-sm text-[var(--color-muted)]">
         <div className="rounded-[22px] border border-white/8 bg-white/4 p-4">
           <p className="font-mono text-[11px] uppercase tracking-[0.22em]">
-            Current milestone
+            Current step
           </p>
           <p className="mt-2 text-base text-[var(--color-ink)]">
             {summary.currentMilestone ?? "Ready to execute"}

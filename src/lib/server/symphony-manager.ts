@@ -157,7 +157,11 @@ function buildWorkflow(
   const workspaceRoot = getProjectWorkspaceRoot(project.slug);
   const repoSource = repoSourceForGitClone(normalizeRepoSource(project.repoSource));
   const codexBin = resolveCodexBin();
-  const codexCommand = `${shellQuote(codexBin)} app-server`;
+  const codexCommand = [
+    shellQuote(codexBin),
+    "app-server",
+    ...(project.executionModel ? ["--model", shellQuote(project.executionModel)] : []),
+  ].join(" ");
 
   return [
     "---",
@@ -179,8 +183,8 @@ function buildWorkflow(
     "  after_create: |",
     `    git clone --depth 1 ${shellQuote(repoSource)} .`,
     "agent:",
-    "  max_concurrent_agents: 2",
-    "  max_turns: 24",
+    `  max_concurrent_agents: ${project.symphonyMaxConcurrentAgents}`,
+    `  max_turns: ${project.symphonyMaxTurns}`,
     "observability:",
     "  refresh_ms: 1000",
     "codex:",

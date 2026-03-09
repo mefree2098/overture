@@ -22,11 +22,12 @@ case "$MODE" in
     echo "Overture is starting on http://127.0.0.1:3000"
     echo "Runtime data is bind-mounted to $ROOT_DIR/.overture"
     echo "The Docker image now bootstraps Codex CLI, Symphony dependencies, and ChatGPT-backed Codex auth automatically."
+    echo "Project and model defaults can be adjusted in the UI at http://127.0.0.1:3000/settings"
     echo "Health probe: curl http://127.0.0.1:3000/api/health"
     ;;
   jetson)
     echo "Jetson deployment notes are in infra/jetson/README.md"
-    echo "Use an arm64 image build and provide OPENAI_API_KEY so the container can bootstrap Codex automatically."
+    echo "Use an arm64 image build and provide OPENAI_API_KEY for hosted Codex auth on the device."
     ;;
   azure)
     echo "Azure deployment assets are in infra/azure/main.bicep"
