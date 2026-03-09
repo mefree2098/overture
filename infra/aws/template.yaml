@@ -1,5 +1,11 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Overture control plane baseline deployment
+Description: Overture control plane AWS planning baseline (not a live Symphony hosting stack)
+
+Parameters:
+  OpenAIApiKey:
+    Type: String
+    NoEcho: true
+    Description: Placeholder secret for future container-hosted Codex bootstrap
 
 Resources:
   OvertureKmsKey:

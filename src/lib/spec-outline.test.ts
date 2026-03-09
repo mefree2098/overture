@@ -12,7 +12,7 @@ describe("extractOutline", () => {
     expect(outline).toEqual([
       { level: 1, title: "Heading One" },
       { level: 2, title: "Heading Two" },
-      { level: 2, title: "3) Bold Heading" },
+      { level: 3, title: "3) Bold Heading" },
     ]);
   });
 });

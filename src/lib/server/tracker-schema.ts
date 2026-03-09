@@ -5,11 +5,13 @@ import {
   listTrackerIssuesForProject,
   updateWorkItemFromTracker,
 } from "@/lib/server/repository";
+import type { TrackerIssue } from "@/lib/types";
 
 const schema = buildSchema(`
   type Query {
     issues(filter: IssueFilter, first: Int, after: String): IssueConnection!
     issue(id: ID!): Issue
+    viewer: Viewer!
   }
 
   type Mutation {
@@ -72,14 +74,20 @@ const schema = buildSchema(`
     identifier: String!
     title: String!
     description: String!
+    priority: Int
+    branchName: String
     url: String!
+    createdAt: String!
     updatedAt: String!
     state: TeamState!
+    assignee: User
+    labels: LabelConnection!
+    inverseRelations(first: Int): InverseRelationConnection!
     team: Team!
   }
 
   type Team {
-    states(filter: TeamStateFilter): TeamStateConnection!
+    states(filter: TeamStateFilter, first: Int): TeamStateConnection!
   }
 
   input TeamStateFilter {
@@ -94,6 +102,31 @@ const schema = buildSchema(`
     id: ID!
     name: String!
   }
+
+  type Viewer {
+    id: ID!
+  }
+
+  type User {
+    id: ID!
+  }
+
+  type LabelConnection {
+    nodes: [Label!]!
+  }
+
+  type Label {
+    name: String!
+  }
+
+  type InverseRelationConnection {
+    nodes: [InverseRelation!]!
+  }
+
+  type InverseRelation {
+    type: String!
+    issue: Issue!
+  }
 `);
 
 const teamStates = [
@@ -104,13 +137,47 @@ const teamStates = [
   { id: "state-done", name: "Done" },
 ];
 
-function issueToGraphql(issue: NonNullable<ReturnType<typeof getTrackerIssueById>>) {
+function issueToGraphql(issue: TrackerIssue) {
   return {
     ...issue,
+    priority: issue.priority,
+    branchName: issue.branchName,
     state: {
       id: issue.stateId,
       name: issue.stateName,
     },
+    assignee: issue.assigneeId ? { id: issue.assigneeId } : null,
+    labels: {
+      nodes: issue.labels.map((name) => ({ name })),
+    },
+    inverseRelations: () => ({
+      nodes: issue.blockedBy.map((blocker) => ({
+        type: "blocks",
+        issue: {
+          id: blocker.id,
+          identifier: blocker.identifier,
+          title: blocker.identifier,
+          description: "",
+          priority: null,
+          branchName: null,
+          url: "",
+          createdAt: issue.createdAt,
+          updatedAt: issue.updatedAt,
+          state: {
+            id: teamStates.find((state) => state.name === blocker.stateName)?.id ?? "state-todo",
+            name: blocker.stateName ?? "Todo",
+          },
+          assignee: null,
+          labels: { nodes: [] },
+          inverseRelations: () => ({ nodes: [] }),
+          team: {
+            states: () => ({
+              nodes: teamStates,
+            }),
+          },
+        },
+      })),
+    }),
     team: {
       states: ({
         filter,
@@ -174,11 +241,7 @@ export async function executeTrackerQuery(input: {
                 .map((issue) => issueToGraphql(issue!))
             : projectSlug
               ? listTrackerIssuesForProject(projectSlug, states).map((issue) =>
-                  issueToGraphql({
-                    ...issue,
-                    stateName: issue.stateName,
-                    stateId: issue.stateId,
-                  }),
+                  issueToGraphql(issue),
                 )
               : [];
 
@@ -194,6 +257,9 @@ export async function executeTrackerQuery(input: {
         const issue = getTrackerIssueById(id);
         return issue ? issueToGraphql(issue) : null;
       },
+      viewer: () => ({
+        id: "overture-worker",
+      }),
       commentCreate: ({ input: mutationInput }: { input: { issueId: string; body: string } }) => {
         addTrackerComment(mutationInput);
         return { success: true };

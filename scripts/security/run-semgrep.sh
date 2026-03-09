@@ -13,13 +13,14 @@ if command -v semgrep >/dev/null 2>&1; then
     --exclude node_modules \
     --exclude .next \
     --exclude .overture \
+    --exclude vendor \
     "$ROOT_DIR"
 else
   docker run --rm \
     -v "$ROOT_DIR:/src" \
     -v "$OUTPUT_DIR:/out" \
     semgrep/semgrep:latest \
-    semgrep scan --config auto --json --output /out/semgrep.json /src
+    semgrep scan --config auto --json --output /out/semgrep.json --exclude vendor /src
 fi
 
 echo "Semgrep report written to $OUTPUT_DIR/semgrep.json"

@@ -2,22 +2,23 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
-import { getProjectSnapshot } from "@/lib/server/repository";
-import { getSymphonyRuntime } from "@/lib/server/symphony-manager";
+import { deleteProject } from "@/lib/server/repository";
 
-export async function GET(
+export async function DELETE(
   _request: Request,
   context: { params: Promise<{ projectId: string }> },
 ) {
   const { projectId } = await context.params;
-  const snapshot = getProjectSnapshot(projectId);
+  const project = await deleteProject(projectId);
 
-  if (!snapshot) {
+  if (!project) {
     return NextResponse.json({ error: "Project not found." }, { status: 404 });
   }
 
   return NextResponse.json({
-    ...snapshot,
-    symphony: await getSymphonyRuntime(snapshot.project.slug),
+    ok: true,
+    projectId,
+    slug: project.slug,
+    name: project.name,
   });
 }

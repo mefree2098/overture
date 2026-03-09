@@ -4,71 +4,90 @@
 
 # Overture
 
-Overture is a local-first control plane for resumable AI software delivery. It ingests a deep-research implementation plan, turns it into a dependency-aware execution graph, injects mandatory QA, security, deployment, and release gates, and keeps evidence attached until the project is actually closure-ready.
+Overture is a local-first AI delivery control plane. It takes a deep-research markdown blueprint, runs a real Codex planning pass to turn that document into milestones, epics, and execution tickets, mirrors that graph through a Linear-compatible tracker surface, and launches Symphony as the autonomous execution runtime.
 
-The current implementation is a working Next.js app with a SQLite-backed project model, a Linear-compatible tracker shim, a mock Symphony-style execution runner, verification tooling, and containerized local deployment.
+The current app is a working Next.js control plane with SQLite persistence, real LLM-backed plan ingestion, vendored Symphony orchestration, artifact storage, gate tracking, runtime observability, and project deletion.
 
-## What Overture does
+## What the platform does
 
-- Ingests a markdown plan such as [plan.md](./plan.md)
-- Extracts milestones, epics, risks, open questions, and acceptance criteria
-- Normalizes the result into canonical projects, plan versions, work items, dependencies, findings, artifacts, runs, and audit events
-- Injects required QA, security, deployment, and release gates into the execution graph
-- Exposes a Linear-compatible GraphQL tracker surface for external agent polling and state sync
-- Runs a background execution loop that simulates autonomous delivery and writes immutable evidence artifacts
-- Surfaces project health, release readiness, findings, artifacts, deployment evidence, and audit trail in the UI
+- Ingests deep-research markdown plans
+- Uses Codex to produce a structured execution model
+- Generates milestones, epics, dependency edges, findings, runs, artifacts, and audit events
+- Injects mandatory QA, security, deployment, observability, documentation, and release gates
+- Exposes a Linear-compatible tracker GraphQL surface for Symphony polling
+- Launches Symphony against a per-project workflow contract
+- Tracks gate readiness, runtime state, artifacts, findings, and audit history in the UI
+- Supports hard deletion of failed or stale projects from the dashboard and project page
 
-## Implemented stack
+## Runtime model
 
-- App framework: Next.js 16 + React 19
-- Persistence: SQLite via `better-sqlite3`
-- Validation/parsing: `zod`, markdown parsing utilities, structured plan generation
-- UI: App Router, custom styling, markdown rendering, operator dashboard views
-- Testing: Vitest + Playwright
-- Security tooling: Semgrep, Trivy, ZAP baseline
-- Deployment: standalone Next.js server, Docker Compose, Azure Bicep, AWS CloudFormation, Jetson notes
+There are two supported execution modes:
+
+- `local_chatgpt`: uses the local Codex runtime already authenticated on the machine running Overture
+- `hosted_api`: uses Codex with `OPENAI_API_KEY`
+
+The automated local container deployment now includes the Codex CLI, `git`, the Elixir runtime required by Symphony, and startup auth bootstrapping. On container startup, Overture copies the host machine's ChatGPT-backed Codex auth into the container's persisted `CODEX_HOME` under the platform runtime root so live planning and execution work without an extra login step.
+
+## Stack
+
+- Next.js 16 + React 19
+- SQLite via `better-sqlite3`
+- Zod for validation
+- Custom control-plane UI on the App Router
+- Vitest for unit coverage
+- Playwright for end-to-end verification
+- Semgrep, Trivy, and ZAP wrappers for security checks
+- Vendored Symphony runtime under `vendor/symphony`
 
 ## Repository layout
 
-- [src/app](./src/app): routes, pages, and API endpoints
-- [src/components](./src/components): UI components for intake, dashboards, artifacts, and shell views
-- [src/lib/server](./src/lib/server): database, storage, repository, parsing, tracker shim, and plan generation
-- [scripts](./scripts): seeding, runner loop, and security wrappers
-- [tests/e2e](./tests/e2e): browser-level product smoke coverage
-- [infra](./infra): deployment assets for Azure, AWS, and Jetson
-- [plan.md](./plan.md): source blueprint used to seed the example project
-- [icon.png](./icon.png): project branding asset used in this README
+- `src/app`: routes, pages, and API endpoints
+- `src/components`: intake, dashboard, runtime, and review UI
+- `src/lib/server`: persistence, planner, tracker shim, Symphony manager, storage, and repository logic
+- `scripts`: seeding, runner entrypoint, and security wrappers
+- `tests/e2e`: browser-level product tests
+- `infra`: Azure, AWS, and Jetson deployment assets and notes
+- `vendor/symphony`: vendored Symphony runtime used for execution
+- `plan.md`: sample source blueprint
 
 ## Prerequisites
 
 - Node.js 22+
 - npm
-- Docker Desktop for local container deployment and ZAP scanning
+- Docker Desktop for local container deployment and ZAP
+- A working Codex runtime for live planning and execution
 
-Optional local tools:
+Optional local binaries:
 
 - `semgrep`
 - `trivy`
-
-If those binaries are not installed locally, the security wrappers fall back to Docker where applicable.
+- `mix` if you want to override the bundled Symphony build tool path
 
 ## Environment
 
-Copy [`.env.example`](./.env.example) to `.env` for local development:
+Start from the shipped example:
 
 ```bash
 cp .env.example .env
 ```
 
-Supported variables:
+Common variables:
 
-- `CONTROL_PLANE_TRACKER_TOKEN`: demo token for the control-plane tracker surface
-- `SYMPHONY_TRACKER_TOKEN`: demo token for Symphony-style polling clients
-- `NEXT_PUBLIC_DEFAULT_REPO`: default repo path shown in the intake form
-- `PORT`: app port for local or container runtime
-- `OVERTURE_ROOT`: optional override for the runtime data root
+- `CONTROL_PLANE_TRACKER_TOKEN`: token accepted by the tracker shim
+- `SYMPHONY_TRACKER_TOKEN`: token used by Symphony against the tracker shim
+- `NEXT_PUBLIC_DEFAULT_REPO`: default repo source shown in intake
+- `OPENAI_API_KEY`: required for `hosted_api` and cloud-style deployments
+- `PORT`: app port
+- `OVERTURE_BIND_HOST`: bind host for `npm run start`
+- `OVERTURE_ROOT`: optional runtime data root override; defaults to `<repo>/.overture`
+- `CODEX_HOME`: optional Codex auth/state home; Docker defaults this under `.overture`
+- `OVERTURE_CODEX_BIN`: optional Codex CLI override
+- `OVERTURE_MIX_BIN`: optional `mix` override for Symphony builds
+- `OVERTURE_SYMPHONY_BIN`: optional Symphony binary override
+- `OVERTURE_SYMPHONY_PORT_BASE`: base port used for per-project Symphony runtimes
+- `OVERTURE_ORIGIN`: override origin used by the runner script
 
-## Quick start
+## Native quick start
 
 Install dependencies:
 
@@ -76,7 +95,7 @@ Install dependencies:
 npm install
 ```
 
-Start the app in development:
+Run the app in development:
 
 ```bash
 npm run dev
@@ -84,63 +103,93 @@ npm run dev
 
 Open [http://127.0.0.1:3000](http://127.0.0.1:3000).
 
-### Seed the example project from `plan.md`
+For a production-style native launch:
 
-Create the canonical seeded project:
+```bash
+npm run build
+npm run start
+```
+
+This remains the simplest path for real project creation and execution when you want to use local ChatGPT-backed Codex auth.
+
+## Create and execute a project
+
+You can paste or upload a blueprint in the UI, or seed the sample `plan.md` from the command line:
 
 ```bash
 npm run seed
 ```
 
-This prints a project ID. To execute the generated work graph:
+That prints a project id. To launch Symphony for that project:
 
 ```bash
 npm run runner -- <project-id>
 ```
 
-You can also create projects directly from the UI by pasting or uploading markdown.
+The project page shows live Symphony runtime state, bootstrap logs, retry queues, tracker slices, artifacts, findings, and gate status.
 
-## Main scripts
+## Delete a project
 
-- `npm run dev`: run the Next.js dev server
-- `npm run build`: create the production build and standalone static bundle
-- `npm run start`: run the standalone production server
-- `npm run seed`: seed the current root `plan.md` into the database
-- `npm run runner -- <project-id>`: execute queued work items for a project
-- `npm run lint`: run ESLint
-- `npm run test`: run unit tests
-- `npm run e2e`: run Playwright against an isolated `.overture-e2e` runtime
-- `npm run qa`: run lint, unit tests, and production build
-- `npm run security`: run Semgrep and Trivy
-- `npm run security:zap`: run ZAP baseline against a live app URL
-- `npm run deploy:local`: build and start the Docker Compose deployment
+Project deletion is available in two places:
 
-## Verification workflow
+- The project dashboard cards on the home page
+- The `Delete project` control on an individual project page
 
-Recommended local verification sequence:
+Deletion is a hard delete. It stops any active Symphony runtime for the project, removes the project row from SQLite, and deletes its runtime folders under `.overture/projects`, `.overture/artifacts`, and `.overture/workspaces`.
+
+Equivalent API:
+
+```text
+DELETE /api/projects/:projectId
+```
+
+## Scripts
+
+- `npm run dev`: Next.js development server
+- `npm run build`: production build
+- `npm run start`: standalone production server bound via `OVERTURE_BIND_HOST` and `PORT`
+- `npm run seed`: ingest the repo `plan.md`
+- `npm run runner -- <project-id>`: launch or reattach Symphony for a project
+- `npm run lint`: ESLint
+- `npm run test`: Vitest
+- `npm run e2e`: Playwright against an isolated `.overture-e2e` runtime
+- `npm run qa`: lint, unit tests, and production build
+- `npm run security`: Semgrep and Trivy
+- `npm run security:zap`: ZAP baseline against a running app
+- `npm run deploy:local`: Docker Compose local deployment helper
+
+## Verification flow
+
+Recommended local verification:
 
 ```bash
 npm run qa
 npm run e2e
 npm run security
 ZAP_TARGET_URL=http://127.0.0.1:3000 npm run security:zap
-```
-
-Dependency audit:
-
-```bash
 npm audit --audit-level=high
 ```
 
-## Local deployment
+## Docker deployment
 
-Bring up the containerized app:
+Bring up the containerized control plane:
 
 ```bash
 npm run deploy:local
 ```
 
-This builds the production image and starts the app on [http://127.0.0.1:3000](http://127.0.0.1:3000).
+This requires a usable ChatGPT Codex login on the host machine. `deploy.sh local` exports that host auth directory into the container automatically.
+
+The local Docker setup now:
+
+- Builds the production image
+- Installs the Codex CLI automatically
+- Installs `git` and the Elixir runtime needed by Symphony
+- Includes the vendored Symphony runtime
+- Binds `.overture` from the host into `/app/.overture`
+- Persists Codex auth under `/app/.overture/codex-home`
+- Copies host ChatGPT Codex auth into the container automatically
+- Exposes the app at [http://127.0.0.1:3000](http://127.0.0.1:3000)
 
 Health check:
 
@@ -148,63 +197,50 @@ Health check:
 curl http://127.0.0.1:3000/api/health
 ```
 
-Docker Compose uses a named volume for `/app/.overture`, so runtime state persists across container restarts.
-
-## Seeding and executing inside Docker
-
-If you want the containerized instance to contain the example `plan.md` project:
-
-```bash
-docker compose exec -T overture npm run seed
-docker compose exec -T overture node --import tsx scripts/runner.ts <project-id>
-```
-
-## Security posture
-
-The app currently includes:
-
-- strict response headers configured in [next.config.ts](./next.config.ts)
-- non-root container runtime in [Dockerfile](./Dockerfile)
-- Docker health check
-- Trivy-scanned Docker and AWS deployment assets
-- ZAP baseline policy in [scripts/security/zap-rules.conf](./scripts/security/zap-rules.conf) for documented false-positive suppression
-- immutable artifact storage rooted under the runtime data directory with path-boundary checks
+If the host machine is not already logged into Codex, `deploy.sh local` now fails before startup and the container entrypoint also fails fast. A successful container boot means the required runtime dependencies and ChatGPT-backed Codex auth bootstrap path are present.
 
 ## Runtime data
 
-Overture stores local runtime state outside source code under:
+Default runtime directories:
 
-- `.overture/`: primary app data for local/dev/prod runs
 - `.overture/data/overture.db`: canonical SQLite database
-- `.overture/artifacts/`: immutable generated evidence
-- `.overture/projects/`: generated project documents
-- `.overture/workspaces/`: runner workspaces
-- `.overture-e2e/`: isolated Playwright runtime
+- `.overture/artifacts`: immutable evidence files
+- `.overture/codex-home`: persisted Codex CLI auth and local Codex state for containerized runs
+- `.overture/projects`: per-project workflow contracts and Symphony runtime files
+- `.overture/workspaces`: per-project cloned workspaces used by Symphony
+- `.overture-e2e`: isolated Playwright runtime root
 
-These directories are ignored by Git and excluded from Docker build context.
+`OVERTURE_ROOT` changes where `.overture` is created, but source resolution still points at the actual app repository root.
 
 ## Deployment assets
 
-- [Dockerfile](./Dockerfile): production container image
-- [docker-compose.yml](./docker-compose.yml): local container orchestration
-- [deploy.sh](./deploy.sh): local and Azure deployment helper
-- [infra/azure/main.bicep](./infra/azure/main.bicep): Azure baseline
-- [infra/aws/template.yaml](./infra/aws/template.yaml): AWS baseline
-- [infra/jetson/README.md](./infra/jetson/README.md): Jetson deployment notes
+- `Dockerfile`: local production image
+- `docker-compose.yml`: local container orchestration with a shared `.overture` bind mount
+- `deploy.sh`: helper for local, Jetson, Azure, and AWS deployment entrypoints
+- `infra/jetson/README.md`: Jetson deployment notes
+- `infra/azure/main.bicep`: Azure baseline container-hosting asset with `OPENAI_API_KEY` secret injection
+- `infra/aws/template.yaml`: AWS planning baseline; this is not yet a live Symphony hosting stack
 
 ## API surface
 
-Key routes:
+- `GET /api/health`: health probe
+- `GET /api/projects`: list project summaries
+- `POST /api/projects`: create a project from spec content
+- `DELETE /api/projects/:projectId`: hard-delete a project
+- `GET /api/projects/:projectId/snapshot`: fetch the full project snapshot
+- `POST /api/projects/:projectId/execute`: launch or refresh Symphony for the project
+- `GET /api/artifacts/:artifactId`: stream a stored artifact
+- `POST /api/tracker/graphql`: Linear-compatible tracker shim
 
-- `/api/health`: health probe
-- `/api/projects`: create projects from spec content
-- `/api/projects/:projectId/snapshot`: fetch the full project snapshot
-- `/api/projects/:projectId/execute`: trigger execution of queued work
-- `/api/artifacts/:artifactId`: stream stored artifacts
-- `/api/tracker/graphql`: Linear-compatible tracker shim
+## Security notes
 
-## Notes
+- Artifact reads are boundary-checked before file access
+- Security scans exclude vendored third-party runtime code from first-party policy failures
+- The app ships response headers via `next.config.ts`
+- The Docker image runs as a non-root user
 
-- The execution loop is currently a mock Symphony-style runner that writes deterministic evidence artifacts rather than invoking a real agent provider.
-- The tracker endpoint is intentionally compatible with the orchestration shape needed for polling and state reconciliation.
-- The shipped local deployment is production-built and runs the standalone Next.js server, not the dev server.
+## Current deployment reality
+
+- Native host execution and Docker deployment are both wired for real operation
+- Docker local deployment now installs and boots the required Codex and Symphony runtime dependencies automatically
+- Azure and AWS assets remain deployment baselines, not finished hosted production stacks

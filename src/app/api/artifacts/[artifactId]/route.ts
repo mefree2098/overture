@@ -2,15 +2,13 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { NextResponse } from "next/server";
-import { getWorkspaceRoot } from "@/lib/server/storage";
+import { getPlatformRoot } from "@/lib/server/storage";
 import { getArtifactById, resolveArtifactPath } from "@/lib/server/repository";
 
 function sanitiseTextContent(content: string) {
-  return content.replaceAll(
-    `${getWorkspaceRoot()}/.overture/workspaces/`,
-    "",
-  );
+  return content.replaceAll(path.join(getPlatformRoot(), "workspaces") + "/", "");
 }
 
 export async function GET(

@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "postbuild": "mkdir -p .next/standalone/.next && rm -rf .next/standalone/.next/static && cp -R .next/static .next/standalone/.next/static",
-    "start": "HOSTNAME=${HOSTNAME:-0.0.0.0} PORT=${PORT:-3000} node .next/standalone/server.js",
+    "start": "HOSTNAME=${OVERTURE_BIND_HOST:-0.0.0.0} PORT=${PORT:-3000} node .next/standalone/server.js",
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",

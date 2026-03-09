@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { notFound } from "next/navigation";
 import { ProjectLiveShell } from "@/components/project-live-shell";
 import { getProjectSnapshot } from "@/lib/server/repository";
+import { getSymphonyRuntime } from "@/lib/server/symphony-manager";
 
 export default async function ProjectPage({
   params,
@@ -16,9 +17,16 @@ export default async function ProjectPage({
     notFound();
   }
 
+  const symphony = await getSymphonyRuntime(snapshot.project.slug);
+
   return (
     <main className="pb-8">
-      <ProjectLiveShell initialSnapshot={snapshot} />
+      <ProjectLiveShell
+        initialSnapshot={{
+          ...snapshot,
+          symphony,
+        }}
+      />
     </main>
   );
 }

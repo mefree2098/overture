@@ -26,7 +26,7 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const parsed = projectSchema.parse(await request.json());
-    const project = createProjectFromSpec(parsed);
+    const project = await createProjectFromSpec(parsed);
     return NextResponse.json(project, { status: 201 });
   } catch (error) {
     return NextResponse.json(

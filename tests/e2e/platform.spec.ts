@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 test("creates a project and loads the project dashboard", async ({ page }) => {
   await page.goto("/");
   await expect(
-    page.getByRole("heading", { name: /Ingest a deep research plan/i }),
+    page.getByRole("heading", { name: /Compile a deep research blueprint/i }),
   ).toBeVisible();
 
   const projectName = `E2E Project ${Date.now()}`;
@@ -19,7 +19,7 @@ Milestone A: Platform skeleton
 - Control plane API + UI scaffolding
 `);
 
-  await page.getByRole("button", { name: /Generate project plan/i }).click();
+  await page.getByRole("button", { name: /Compile execution graph/i }).click();
   await page.waitForURL(/\/projects\//);
   await expect(page.getByRole("heading", { name: projectName })).toBeVisible();
 
@@ -28,11 +28,10 @@ Milestone A: Platform skeleton
     fullPage: true,
   });
 
-  await page.getByRole("button", { name: /Run execution loop/i }).click();
+  await page.getByRole("button", { name: /Launch Symphony/i }).click();
   await expect
     .poll(async () => {
-      const statuses = await page.locator("text=Succeeded").count();
-      return statuses > 0;
+      return page.getByText(/Runtime live/i).isVisible();
     })
     .toBeTruthy();
 });

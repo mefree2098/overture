@@ -2,6 +2,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
+import { getSymphonyTrackerToken } from "@/lib/server/runtime-config";
 import { executeTrackerQuery } from "@/lib/server/tracker-schema";
 
 function getTokenRole(request: Request): "symphony" | "control" | "anonymous" {
@@ -12,7 +13,7 @@ function getTokenRole(request: Request): "symphony" | "control" | "anonymous" {
     return "control";
   }
 
-  if (token && token === process.env.SYMPHONY_TRACKER_TOKEN) {
+  if (token && token === getSymphonyTrackerToken()) {
     return "symphony";
   }
 

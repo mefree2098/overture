@@ -29,4 +29,103 @@ describe("generatePlanFromSpec", () => {
     expect(titles).toContain("Deployment verification matrix");
     expect(result.dependencyEdges.length).toBeGreaterThan(0);
   });
+
+  it("creates non-policy work items for heading-driven research plans", () => {
+    const result = generatePlanFromSpec(
+      buildSpecIr(`
+# Research blueprint
+
+## Executive Summary
+
+Writers need stable character memory.
+
+## Product Design Blueprint
+
+### Core user promises
+- Canon-first consistency
+
+### Primary workflows
+**Character creation**
+- Guided intake
+
+## Technical Architecture and UX Flows
+
+### Recommended system architecture
+1. Postgres
+2. pgvector
+`),
+    );
+
+    const nonInjectedTopLevel = result.workItems.filter(
+      (item) => !item.parentId && item.metadata.injected !== true,
+    );
+    const productDesignMilestone = result.workItems.find(
+      (item) => item.title === "Product Design Blueprint",
+    );
+    const primaryWorkflowsEpic = result.workItems.find(
+      (item) => item.title === "Primary workflows",
+    );
+    const duplicatePrimaryWorkflowTask = result.workItems.find(
+      (item) =>
+        item.title === "Primary workflows" &&
+        item.parentId === productDesignMilestone?.id &&
+        item.id !== primaryWorkflowsEpic?.id,
+    );
+
+    expect(nonInjectedTopLevel.map((item) => item.title)).toContain(
+      "Product Design Blueprint",
+    );
+    expect(nonInjectedTopLevel.map((item) => item.title)).toContain(
+      "Technical Architecture and UX Flows",
+    );
+    expect(nonInjectedTopLevel).not.toContainEqual(
+      expect.objectContaining({ title: "Primary workflows" }),
+    );
+    expect(primaryWorkflowsEpic?.parentId).toBe(productDesignMilestone?.id ?? null);
+    expect(duplicatePrimaryWorkflowTask).toBeUndefined();
+  });
+
+  it("keeps blueprint roots when explicit roadmap blocks appear inside research plans", () => {
+    const result = generatePlanFromSpec(
+      buildSpecIr(`
+# Delivery blueprint
+
+## Product Design Blueprint
+
+### Core user promises
+- Canon-first consistency
+
+## Implementation roadmap
+
+Milestone A: Platform skeleton
+- Control plane API + UI scaffolding
+
+### Detailed backlog / epics / tasks
+
+Epic: Verification loop
+- Screenshot evidence capture
+`),
+    );
+
+    const nonInjectedTopLevel = result.workItems.filter(
+      (item) => !item.parentId && item.metadata.injected !== true,
+    );
+    const roadmapMilestone = result.workItems.find(
+      (item) => item.title === "Implementation roadmap",
+    );
+    const verificationEpic = result.workItems.find(
+      (item) => item.title === "Verification loop",
+    );
+
+    expect(nonInjectedTopLevel.map((item) => item.title)).toContain(
+      "Product Design Blueprint",
+    );
+    expect(nonInjectedTopLevel.map((item) => item.title)).toContain(
+      "Implementation roadmap",
+    );
+    expect(nonInjectedTopLevel.map((item) => item.title)).not.toContain(
+      "Milestone A: Platform skeleton",
+    );
+    expect(verificationEpic?.parentId).toBe(roadmapMilestone?.id ?? null);
+  });
 });

@@ -1,11 +1,7 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 
-function resolveWorkspaceRoot() {
-  if (process.env.OVERTURE_ROOT) {
-    return path.resolve(process.env.OVERTURE_ROOT);
-  }
-
+function resolveAppRoot() {
   const cwd = process.cwd();
 
   if (
@@ -18,7 +14,15 @@ function resolveWorkspaceRoot() {
   return cwd;
 }
 
-const rootDir = path.join(resolveWorkspaceRoot(), ".overture");
+function resolveRuntimeBaseRoot() {
+  if (process.env.OVERTURE_ROOT) {
+    return path.resolve(process.env.OVERTURE_ROOT);
+  }
+
+  return resolveAppRoot();
+}
+
+const rootDir = path.join(resolveRuntimeBaseRoot(), ".overture");
 const dataDir = path.join(rootDir, "data");
 const artifactsDir = path.join(rootDir, "artifacts");
 const projectsDir = path.join(rootDir, "projects");
@@ -33,7 +37,11 @@ export function getPlatformRoot() {
 }
 
 export function getWorkspaceRoot() {
-  return path.dirname(rootDir);
+  return resolveAppRoot();
+}
+
+export function getRuntimeBaseRoot() {
+  return resolveRuntimeBaseRoot();
 }
 
 export function getDatabasePath() {
@@ -44,20 +52,28 @@ export function getArtifactsRoot() {
   return artifactsDir;
 }
 
+export function getProjectPaths(projectSlug: string) {
+  return {
+    projectRoot: path.join(projectsDir, projectSlug),
+    projectArtifactsRoot: path.join(artifactsDir, projectSlug),
+    projectWorkspaceRoot: path.join(workspacesDir, projectSlug),
+  };
+}
+
 export function getProjectRoot(projectSlug: string) {
-  const projectRoot = path.join(projectsDir, projectSlug);
+  const { projectRoot } = getProjectPaths(projectSlug);
   mkdirSync(projectRoot, { recursive: true });
   return projectRoot;
 }
 
 export function getProjectArtifactsRoot(projectSlug: string) {
-  const projectArtifactsRoot = path.join(artifactsDir, projectSlug);
+  const { projectArtifactsRoot } = getProjectPaths(projectSlug);
   mkdirSync(projectArtifactsRoot, { recursive: true });
   return projectArtifactsRoot;
 }
 
 export function getProjectWorkspaceRoot(projectSlug: string) {
-  const projectWorkspaceRoot = path.join(workspacesDir, projectSlug);
+  const { projectWorkspaceRoot } = getProjectPaths(projectSlug);
   mkdirSync(projectWorkspaceRoot, { recursive: true });
   return projectWorkspaceRoot;
 }

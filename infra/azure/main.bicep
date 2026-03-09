@@ -7,6 +7,13 @@ param environmentName string = 'overture-env'
 @description('Container app name')
 param appName string = 'overture-control-plane'
 
+@description('Container image reference')
+param image string = 'ghcr.io/example/overture:latest'
+
+@secure()
+@description('OpenAI API key used to bootstrap Codex inside the container')
+param openAIApiKey string
+
 @description('Cosmos DB account name')
 param cosmosName string = 'overturecosmos'
 
@@ -58,6 +65,12 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
   properties: {
     managedEnvironmentId: managedEnvironment.id
     configuration: {
+      secrets: [
+        {
+          name: 'openai-api-key'
+          value: openAIApiKey
+        }
+      ]
       ingress: {
         external: true
         targetPort: 3000
@@ -67,7 +80,21 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
       containers: [
         {
           name: 'overture'
-          image: 'ghcr.io/example/overture:latest'
+          image: image
+          env: [
+            {
+              name: 'PORT'
+              value: '3000'
+            }
+            {
+              name: 'OVERTURE_BIND_HOST'
+              value: '0.0.0.0'
+            }
+            {
+              name: 'OPENAI_API_KEY'
+              secretRef: 'openai-api-key'
+            }
+          ]
           resources: {
             cpu: 0.5
             memory: '1Gi'

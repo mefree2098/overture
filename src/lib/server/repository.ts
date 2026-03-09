@@ -1,14 +1,18 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { DEFAULT_POLICY_PROFILE } from "@/lib/constants";
 import { getDb } from "@/lib/server/db";
+import { buildSpecIrWithLlm } from "@/lib/server/llm-planner";
 import { generatePlanFromSpec } from "@/lib/server/plan-generator";
-import { buildSpecIr, getContentHash } from "@/lib/server/spec-parser";
+import { normalizeRepoSource } from "@/lib/server/runtime-config";
+import { getContentHash } from "@/lib/server/spec-parser";
+import { stopSymphonyForProject } from "@/lib/server/symphony-manager";
 import {
   assertWithinRoot,
   getArtifactsRoot,
   getProjectArtifactsRoot,
+  getProjectPaths,
   getProjectRoot,
   getProjectWorkspaceRoot,
 } from "@/lib/server/storage";
@@ -37,6 +41,112 @@ function nowIso() {
 
 function serialise(value: unknown) {
   return JSON.stringify(value);
+}
+
+function sanitizeBranchSegment(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+function uniqueTrackerLabels(workItem: WorkItemRecord) {
+  return [
+    workItem.type,
+    typeof workItem.metadata.lane === "string" ? String(workItem.metadata.lane) : null,
+  ]
+    .filter(Boolean)
+    .filter((value, index, values) => values.indexOf(value) === index) as string[];
+}
+
+function hydrateProjectWorkItems(projectId: string) {
+  const db = getDb();
+
+  return db
+    .prepare("SELECT * FROM work_items WHERE project_id = ? ORDER BY sort_order ASC")
+    .all(projectId)
+    .map((row) => hydrateWorkItem(row as Record<string, unknown>));
+}
+
+function hydrateProjectDependencies(projectId: string) {
+  const db = getDb();
+
+  return db
+    .prepare("SELECT * FROM dependency_edges WHERE project_id = ?")
+    .all(projectId)
+    .map((row) => hydrateDependency(row as Record<string, unknown>));
+}
+
+function isTerminalWorkItemStatus(status: WorkItemStatus) {
+  return status === "done" || status === "waived";
+}
+
+function resolveGateSnapshot(
+  workItems: WorkItemRecord[],
+  findings: FindingRecord[],
+  artifacts: ArtifactRecord[],
+) {
+  const hasOpenSecurityFinding = findings.some(
+    (finding) =>
+      finding.category === "security" &&
+      ["critical", "high"].includes(finding.severity) &&
+      !["resolved", "accepted_risk"].includes(finding.status),
+  );
+  const hasOpenQaFinding = findings.some(
+    (finding) =>
+      finding.category === "qa" &&
+      !["resolved", "accepted_risk"].includes(finding.status),
+  );
+  const hasOpenDeployFinding = findings.some(
+    (finding) =>
+      finding.category === "deploy" &&
+      !["resolved", "accepted_risk"].includes(finding.status),
+  );
+  const qaTasksComplete = workItems
+    .filter((workItem) => workItem.type === "qa")
+    .every((workItem) => isTerminalWorkItemStatus(workItem.status));
+  const securityTasksComplete = workItems
+    .filter((workItem) => workItem.type === "security")
+    .every((workItem) => isTerminalWorkItemStatus(workItem.status));
+  const deployTasksComplete = workItems
+    .filter((workItem) => workItem.type === "deploy")
+    .every((workItem) => isTerminalWorkItemStatus(workItem.status));
+  const allTasksComplete = workItems.every((workItem) => isTerminalWorkItemStatus(workItem.status));
+
+  const qaStatus = hasOpenQaFinding ? "fail" : qaTasksComplete ? "pass" : "pending";
+  const securityStatus = hasOpenSecurityFinding
+    ? "fail"
+    : securityTasksComplete
+      ? "pass"
+      : "pending";
+  const deployStatus = hasOpenDeployFinding
+    ? "fail"
+    : deployTasksComplete || artifacts.some((artifact) => artifact.kind === "deploy-plan")
+      ? "pass"
+      : "pending";
+  const releaseStatus =
+    qaStatus === "pass" &&
+    securityStatus === "pass" &&
+    deployStatus === "pass" &&
+    allTasksComplete
+      ? "pass"
+      : hasOpenSecurityFinding || hasOpenQaFinding
+        ? "fail"
+        : "pending";
+
+  return {
+    qaStatus,
+    securityStatus,
+    deployStatus,
+    releaseStatus,
+    hasOpenQaFinding,
+    hasOpenSecurityFinding,
+    hasOpenDeployFinding,
+  } satisfies Pick<
+    GateStatusRecord,
+    "qaStatus" | "securityStatus" | "deployStatus" | "releaseStatus"
+  > & {
+    hasOpenQaFinding: boolean;
+    hasOpenSecurityFinding: boolean;
+    hasOpenDeployFinding: boolean;
+  };
 }
 
 function hydrateProject(row: Record<string, unknown>): ProjectRecord {
@@ -368,10 +478,7 @@ export function createFinding(input: {
 
 export function recomputeGateStatuses(projectId: string) {
   const db = getDb();
-  const workItems = db
-    .prepare("SELECT * FROM work_items WHERE project_id = ? ORDER BY sort_order ASC")
-    .all(projectId)
-    .map((row) => hydrateWorkItem(row as Record<string, unknown>));
+  const workItems = hydrateProjectWorkItems(projectId);
   const findings = db
     .prepare("SELECT * FROM findings WHERE project_id = ?")
     .all(projectId)
@@ -381,55 +488,12 @@ export function recomputeGateStatuses(projectId: string) {
     .all(projectId)
     .map((row) => hydrateArtifact(row as Record<string, unknown>));
 
-  const hasOpenSecurityFinding = findings.some(
-    (finding) =>
-      finding.category === "security" &&
-      ["critical", "high"].includes(finding.severity) &&
-      !["resolved", "accepted_risk"].includes(finding.status),
-  );
-  const hasOpenQaFinding = findings.some(
-    (finding) =>
-      finding.category === "qa" &&
-      !["resolved", "accepted_risk"].includes(finding.status),
-  );
-  const hasOpenDeployFinding = findings.some(
-    (finding) =>
-      finding.category === "deploy" &&
-      !["resolved", "accepted_risk"].includes(finding.status),
-  );
-  const qaTasksComplete = workItems
-    .filter((workItem) => workItem.type === "qa")
-    .every((workItem) => ["done", "waived"].includes(workItem.status));
-  const securityTasksComplete = workItems
-    .filter((workItem) => workItem.type === "security")
-    .every((workItem) => ["done", "waived"].includes(workItem.status));
-  const deployTasksComplete = workItems
-    .filter((workItem) => workItem.type === "deploy")
-    .every((workItem) => ["done", "waived"].includes(workItem.status));
-  const allTasksComplete = workItems.every((workItem) =>
-    ["done", "waived"].includes(workItem.status),
-  );
-
-  const qaStatus = hasOpenQaFinding ? "fail" : qaTasksComplete ? "pass" : "pending";
-  const securityStatus = hasOpenSecurityFinding
-    ? "fail"
-    : securityTasksComplete
-      ? "pass"
-      : "pending";
-  const deployStatus = hasOpenDeployFinding
-    ? "fail"
-    : deployTasksComplete || artifacts.some((artifact) => artifact.kind === "deploy-plan")
-      ? "pass"
-      : "pending";
-  const releaseStatus =
-    qaStatus === "pass" &&
-    securityStatus === "pass" &&
-    deployStatus === "pass" &&
-    allTasksComplete
-      ? "pass"
-      : hasOpenSecurityFinding || hasOpenQaFinding
-        ? "fail"
-        : "pending";
+  const {
+    qaStatus,
+    securityStatus,
+    deployStatus,
+    releaseStatus,
+  } = resolveGateSnapshot(workItems, findings, artifacts);
   const summary = {
     openFindings: findings.filter(
       (finding) => !["resolved", "accepted_risk"].includes(finding.status),
@@ -470,28 +534,104 @@ export function recomputeGateStatuses(projectId: string) {
   );
 }
 
-export function advanceQueuedWorkItems(projectId: string) {
+function autoCloseReviewedWorkItems(projectId: string) {
   const db = getDb();
-  const workItems = db
-    .prepare("SELECT * FROM work_items WHERE project_id = ?")
+  const workItems = hydrateProjectWorkItems(projectId);
+  const dependencies = hydrateProjectDependencies(projectId);
+  const findings = db
+    .prepare("SELECT * FROM findings WHERE project_id = ?")
     .all(projectId)
-    .map((row) => hydrateWorkItem(row as Record<string, unknown>));
-  const dependencies = db
-    .prepare("SELECT * FROM dependency_edges WHERE project_id = ?")
+    .map((row) => hydrateFinding(row as Record<string, unknown>));
+  const artifacts = db
+    .prepare("SELECT * FROM artifacts WHERE project_id = ?")
     .all(projectId)
-    .map((row) => hydrateDependency(row as Record<string, unknown>));
-
-  const byId = new Map(workItems.map((workItem) => [workItem.id, workItem]));
-  const completedStatuses = new Set(["done", "waived"]);
+    .map((row) => hydrateArtifact(row as Record<string, unknown>));
+  const workItemsById = new Map(workItems.map((workItem) => [workItem.id, workItem]));
   const updateStatus = db.prepare(
     "UPDATE work_items SET status = ?, updated_at = ? WHERE id = ?",
   );
+  let changed = false;
+
+  for (const workItem of workItems) {
+    if (workItem.status !== "awaiting_review") {
+      continue;
+    }
+
+    const blockers = dependencies
+      .filter((edge) => edge.toWorkItemId === workItem.id)
+      .map((edge) => workItemsById.get(edge.fromWorkItemId))
+      .filter(Boolean) as WorkItemRecord[];
+
+    if (!blockers.every((blocker) => isTerminalWorkItemStatus(blocker.status))) {
+      continue;
+    }
+
+    if (workItem.type === "release") {
+      const otherWorkItems = workItems.filter((candidate) => candidate.id !== workItem.id);
+      const gates = resolveGateSnapshot(otherWorkItems, findings, artifacts);
+      const otherTasksComplete = otherWorkItems.every((candidate) =>
+        isTerminalWorkItemStatus(candidate.status),
+      );
+
+      if (
+        !otherTasksComplete ||
+        gates.qaStatus !== "pass" ||
+        gates.securityStatus !== "pass" ||
+        gates.deployStatus !== "pass"
+      ) {
+        continue;
+      }
+    }
+
+    updateStatus.run("done", nowIso(), workItem.id);
+    appendAuditEvent({
+      projectId,
+      workItemId: workItem.id,
+      actor: "control-plane",
+      action: "issue.auto.closed",
+      detail: `${workItem.key} passed review and was closed by Overture gate enforcement.`,
+    });
+    changed = true;
+  }
+
+  return changed;
+}
+
+function settleProjectState(projectId: string) {
+  let changed = false;
+
+  for (let index = 0; index < 6; index += 1) {
+    const advanced = advanceQueuedWorkItems(projectId);
+    const closed = autoCloseReviewedWorkItems(projectId);
+    recomputeGateStatuses(projectId);
+
+    if (!advanced && !closed) {
+      break;
+    }
+
+    changed = true;
+  }
+
+  return changed;
+}
+
+export function advanceQueuedWorkItems(projectId: string) {
+  const db = getDb();
+  const workItems = hydrateProjectWorkItems(projectId);
+  const dependencies = hydrateProjectDependencies(projectId);
+
+  const byId = new Map(workItems.map((workItem) => [workItem.id, workItem]));
+  const updateStatus = db.prepare(
+    "UPDATE work_items SET status = ?, updated_at = ? WHERE id = ?",
+  );
+  let changed = false;
 
   for (const workItem of workItems) {
     if (
-      completedStatuses.has(workItem.status) ||
+      isTerminalWorkItemStatus(workItem.status) ||
       workItem.status === "in_progress" ||
-      workItem.status === "verifying"
+      workItem.status === "verifying" ||
+      workItem.status === "awaiting_review"
     ) {
       continue;
     }
@@ -500,13 +640,16 @@ export function advanceQueuedWorkItems(projectId: string) {
       .filter((edge) => edge.toWorkItemId === workItem.id)
       .map((edge) => byId.get(edge.fromWorkItemId))
       .filter(Boolean) as WorkItemRecord[];
-    const isReady = blockers.every((blocker) => completedStatuses.has(blocker.status));
+    const isReady = blockers.every((blocker) => isTerminalWorkItemStatus(blocker.status));
     const nextStatus = isReady ? "queued" : "blocked";
 
     if (nextStatus !== workItem.status) {
       updateStatus.run(nextStatus, nowIso(), workItem.id);
+      changed = true;
     }
   }
+
+  return changed;
 }
 
 export function listProjects(): ProjectSummary[] {
@@ -517,15 +660,9 @@ export function listProjects(): ProjectSummary[] {
     .map((row) => hydrateProject(row as Record<string, unknown>));
 
   return projects.map((project) => {
-    const workItems = db
-      .prepare("SELECT * FROM work_items WHERE project_id = ? ORDER BY sort_order ASC")
-      .all(project.id)
-      .map((row) => hydrateWorkItem(row as Record<string, unknown>));
-    const gateStatus = hydrateGateStatus(
-      db.prepare("SELECT * FROM gate_statuses WHERE project_id = ?").get(
-        project.id,
-      ) as Record<string, unknown>,
-    );
+    settleProjectState(project.id);
+    const workItems = hydrateProjectWorkItems(project.id);
+    const gateStatus = recomputeGateStatuses(project.id);
     const counts = countWorkItems(workItems);
     const currentMilestone = computeCurrentMilestone(workItems);
     const failingGates = [
@@ -559,6 +696,7 @@ export function getProjectSnapshot(projectId: string): ProjectSnapshot | null {
   }
 
   const project = hydrateProject(projectRow);
+  settleProjectState(projectId);
   const specDocument = db
     .prepare(
       "SELECT * FROM spec_documents WHERE project_id = ? ORDER BY created_at DESC LIMIT 1",
@@ -569,12 +707,7 @@ export function getProjectSnapshot(projectId: string): ProjectSnapshot | null {
       "SELECT * FROM plan_versions WHERE project_id = ? ORDER BY created_at DESC LIMIT 1",
     )
     .get(projectId) as Record<string, unknown> | undefined;
-  const workItems = db
-    .prepare(
-      "SELECT * FROM work_items WHERE project_id = ? ORDER BY sort_order ASC, created_at ASC",
-    )
-    .all(projectId)
-    .map((row) => hydrateWorkItem(row as Record<string, unknown>));
+  const workItems = hydrateProjectWorkItems(projectId);
   const dependencyEdges = db
     .prepare("SELECT * FROM dependency_edges WHERE project_id = ? ORDER BY id ASC")
     .all(projectId)
@@ -634,15 +767,51 @@ export function getProjectSnapshot(projectId: string): ProjectSnapshot | null {
     currentMilestone,
     failingGates,
     trackerIssues: listTrackerIssuesForProject(project.slug),
+    symphony: null,
   };
 }
 
-export function createProjectFromSpec(input: CreateProjectInput) {
+export async function deleteProject(projectId: string) {
+  const db = getDb();
+  const projectRow = db
+    .prepare("SELECT * FROM projects WHERE id = ?")
+    .get(projectId) as Record<string, unknown> | undefined;
+
+  if (!projectRow) {
+    return null;
+  }
+
+  const project = hydrateProject(projectRow);
+  await stopSymphonyForProject(project.slug);
+
+  const {
+    projectRoot,
+    projectArtifactsRoot,
+    projectWorkspaceRoot,
+  } = getProjectPaths(project.slug);
+  const transaction = db.transaction(() => {
+    db.prepare("DELETE FROM projects WHERE id = ?").run(projectId);
+  });
+
+  transaction();
+
+  for (const target of [projectRoot, projectArtifactsRoot, projectWorkspaceRoot]) {
+    rmSync(target, {
+      recursive: true,
+      force: true,
+    });
+  }
+
+  return project;
+}
+
+export async function createProjectFromSpec(input: CreateProjectInput) {
   const db = getDb();
   const projectId = randomUUID();
   const specDocumentId = randomUUID();
   const planVersionId = randomUUID();
   const timestamp = nowIso();
+  const repoSource = normalizeRepoSource(input.repoSource);
   const slugBase = slugify(input.name) || `project-${projectId.slice(0, 8)}`;
   let slug = slugBase;
   let counter = 2;
@@ -658,7 +827,11 @@ export function createProjectFromSpec(input: CreateProjectInput) {
       input.policyProfile?.deploymentTargets ?? DEFAULT_POLICY_PROFILE.deploymentTargets,
   };
 
-  const specIr = buildSpecIr(input.specText);
+  const specIr = await buildSpecIrWithLlm({
+    name: input.name,
+    executionMode: input.executionMode,
+    specText: input.specText,
+  });
   const plan = generatePlanFromSpec(specIr);
   const generatedIdMap = new Map(
     plan.workItems.map((workItem) => [workItem.id, randomUUID()]),
@@ -698,7 +871,7 @@ export function createProjectFromSpec(input: CreateProjectInput) {
       projectId,
       slug,
       input.name,
-      input.repoSource,
+      repoSource,
       input.executionMode,
       "planned",
       "on_track",
@@ -722,7 +895,7 @@ export function createProjectFromSpec(input: CreateProjectInput) {
       input.specFilename,
       contentHash,
       serialise({
-        repoSource: input.repoSource,
+        repoSource,
         outline: specIr.outline,
       }),
       input.specText,
@@ -853,8 +1026,7 @@ export function createProjectFromSpec(input: CreateProjectInput) {
     },
   });
 
-  recomputeGateStatuses(projectId);
-  advanceQueuedWorkItems(projectId);
+  settleProjectState(projectId);
 
   return {
     projectId,
@@ -874,7 +1046,7 @@ export function getArtifactById(artifactId: string) {
 
 export function getExecutableWorkItems(projectId: string) {
   const db = getDb();
-  advanceQueuedWorkItems(projectId);
+  settleProjectState(projectId);
 
   return db
     .prepare(
@@ -993,8 +1165,7 @@ export function completeRun(input: {
     detail: input.summary,
   });
 
-  advanceQueuedWorkItems(input.projectId);
-  recomputeGateStatuses(input.projectId);
+  settleProjectState(input.projectId);
 }
 
 function trackerStateFromStatus(status: WorkItemStatus) {
@@ -1045,6 +1216,32 @@ export function listTrackerIssuesForProject(projectSlug: string, states?: string
     .prepare("SELECT * FROM work_items WHERE project_id = ? ORDER BY sort_order ASC")
     .all(project.id)
     .map((row) => hydrateWorkItem(row as Record<string, unknown>));
+  const blockersByWorkItemId = new Map<
+    string,
+    Array<{ id: string; identifier: string; stateName: string | null }>
+  >();
+
+  const blockerRows = db
+    .prepare(
+      `
+        SELECT dependency_edges.to_work_item_id, work_items.id, work_items.key, work_items.status
+        FROM dependency_edges
+        JOIN work_items ON work_items.id = dependency_edges.from_work_item_id
+        WHERE dependency_edges.project_id = ?
+      `,
+    )
+    .all(project.id) as Array<Record<string, unknown>>;
+
+  blockerRows.forEach((row) => {
+    const blockerState = trackerStateFromStatus(row.status as WorkItemStatus);
+    const blockers = blockersByWorkItemId.get(String(row.to_work_item_id)) ?? [];
+    blockers.push({
+      id: String(row.id),
+      identifier: String(row.key),
+      stateName: blockerState.name,
+    });
+    blockersByWorkItemId.set(String(row.to_work_item_id), blockers);
+  });
 
   return workItems
     .map((workItem) => {
@@ -1054,10 +1251,16 @@ export function listTrackerIssuesForProject(projectSlug: string, states?: string
         identifier: workItem.key,
         title: workItem.title,
         description: workItem.description,
+        priority: workItem.priority,
         stateName: state.name,
         stateId: state.id,
+        branchName: `feature/${sanitizeBranchSegment(`${workItem.key}-${workItem.title}`)}`,
+        assigneeId: null,
+        labels: uniqueTrackerLabels(workItem),
+        blockedBy: blockersByWorkItemId.get(workItem.id) ?? [],
         projectSlug,
         url: `/projects/${project.id}#${workItem.id}`,
+        createdAt: workItem.createdAt,
         updatedAt: workItem.updatedAt,
       } satisfies TrackerIssue;
     })
@@ -1081,16 +1284,37 @@ export function getTrackerIssueById(issueId: string) {
     ) as Record<string, unknown>,
   );
   const state = trackerStateFromStatus(workItem.status);
+  const blockers = db
+    .prepare(
+      `
+        SELECT work_items.id, work_items.key, work_items.status
+        FROM dependency_edges
+        JOIN work_items ON work_items.id = dependency_edges.from_work_item_id
+        WHERE dependency_edges.to_work_item_id = ?
+        ORDER BY work_items.sort_order ASC
+      `,
+    )
+    .all(workItem.id) as Array<Record<string, unknown>>;
 
   return {
     id: workItem.id,
     identifier: workItem.key,
     title: workItem.title,
     description: workItem.description,
+    priority: workItem.priority,
     stateName: state.name,
     stateId: state.id,
+    branchName: `feature/${sanitizeBranchSegment(`${workItem.key}-${workItem.title}`)}`,
+    assigneeId: null,
+    labels: uniqueTrackerLabels(workItem),
+    blockedBy: blockers.map((blocker) => ({
+      id: String(blocker.id),
+      identifier: String(blocker.key),
+      stateName: trackerStateFromStatus(blocker.status as WorkItemStatus).name,
+    })),
     projectSlug: project.slug,
     url: `/projects/${project.id}#${workItem.id}`,
+    createdAt: workItem.createdAt,
     updatedAt: workItem.updatedAt,
   } satisfies TrackerIssue;
 }
@@ -1133,7 +1357,7 @@ export function updateWorkItemFromTracker(input: {
     action: "issue.state.updated",
     detail: `Tracker state changed to ${input.stateId}.`,
   });
-  recomputeGateStatuses(workItem.projectId);
+  settleProjectState(workItem.projectId);
 }
 
 export function addTrackerComment(input: { issueId: string; body: string }) {

@@ -8,10 +8,12 @@ services:
     env_file:
       - .env
     environment:
-      HOSTNAME: 0.0.0.0
+      OVERTURE_BIND_HOST: 0.0.0.0
       PORT: 3000
+      OVERTURE_ROOT: /app
+      CODEX_HOME: /app/.overture/codex-home
+      OVERTURE_CODEX_AUTH_SOURCE: /codex-host/auth.json
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     volumes:
-      - overture_data:/app/.overture
-
-volumes:
-  overture_data:
+      - ./.overture:/app/.overture
+      - ${OVERTURE_CODEX_AUTH_SOURCE_DIR:-${HOME}/.codex}:/codex-host:ro

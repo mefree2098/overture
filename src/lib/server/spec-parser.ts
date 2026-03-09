@@ -12,10 +12,36 @@ import type {
 const HEADING_PATTERN = /^(#{1,6})\s+(.+)$/;
 const BOLD_HEADING_PATTERN = /^\*\*(.+)\*\*$/;
 const BULLET_PATTERN = /^[-*]\s+(.*)$/;
+const ORDERED_LIST_PATTERN = /^\d+[.)]\s+(.*)$/;
+const LIST_PATTERN = /^(?:[-*]|\d+[.)])\s+(.*)$/;
+const CITATION_PATTERN = /[^]+/g;
+
+function cleanExtractedText(value: string) {
+  return value
+    .replace(CITATION_PATTERN, "")
+    .replace(/\*\*/g, "")
+    .replace(/`/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function countMarkdownHeadings(markdown: string, level: number) {
+  const patterns = [
+    /^#\s+.+$/gm,
+    /^##\s+.+$/gm,
+    /^###\s+.+$/gm,
+    /^####\s+.+$/gm,
+    /^#####\s+.+$/gm,
+    /^######\s+.+$/gm,
+  ];
+  const pattern = patterns[Math.max(1, Math.min(level, 6)) - 1];
+  return [...markdown.matchAll(pattern)].length;
+}
 
 function splitIntoSections(text: string): SectionBlock[] {
   const lines = text.split(/\r?\n/);
   const sections: SectionBlock[] = [];
+  let currentMarkdownLevel = 1;
   let current: SectionBlock = {
     title: "Overview",
     level: 1,
@@ -36,9 +62,10 @@ function splitIntoSections(text: string): SectionBlock[] {
 
     if (markdownMatch) {
       pushCurrent();
+      currentMarkdownLevel = markdownMatch[1].length;
       current = {
-        title: markdownMatch[2].trim(),
-        level: markdownMatch[1].length,
+        title: cleanExtractedText(markdownMatch[2]),
+        level: currentMarkdownLevel,
         body: "",
         bullets: [],
       };
@@ -48,8 +75,8 @@ function splitIntoSections(text: string): SectionBlock[] {
     if (boldMatch) {
       pushCurrent();
       current = {
-        title: boldMatch[1].trim(),
-        level: 2,
+        title: cleanExtractedText(boldMatch[1]),
+        level: Math.min(currentMarkdownLevel + 1, 6),
         body: "",
         bullets: [],
       };
@@ -57,8 +84,11 @@ function splitIntoSections(text: string): SectionBlock[] {
     }
 
     const bulletMatch = line.trim().match(BULLET_PATTERN);
+    const orderedMatch = line.trim().match(ORDERED_LIST_PATTERN);
     if (bulletMatch) {
-      current.bullets.push(bulletMatch[1].trim());
+      current.bullets.push(cleanExtractedText(bulletMatch[1]));
+    } else if (orderedMatch) {
+      current.bullets.push(cleanExtractedText(orderedMatch[1]));
     }
 
     current.body += `${line}\n`;
@@ -66,12 +96,47 @@ function splitIntoSections(text: string): SectionBlock[] {
 
   pushCurrent();
 
-  return sections.filter((section) => section.body || section.bullets.length > 0);
+  return sections.filter(
+    (section) =>
+      section.title !== "Overview" || section.body || section.bullets.length > 0,
+  );
+}
+
+function sectionDescendants(sections: SectionBlock[], index: number) {
+  const root = sections[index];
+  const descendants: SectionBlock[] = [];
+
+  for (let cursor = index + 1; cursor < sections.length; cursor += 1) {
+    const candidate = sections[cursor];
+    if (candidate.level <= root.level) {
+      break;
+    }
+    descendants.push(candidate);
+  }
+
+  return descendants;
+}
+
+function parentSectionIndex(sections: SectionBlock[], index: number) {
+  const current = sections[index];
+
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    if (sections[cursor].level < current.level) {
+      return cursor;
+    }
+  }
+
+  return null;
+}
+
+function findSectionIndex(sections: SectionBlock[], query: string) {
+  const normalized = query.toLowerCase();
+  return sections.findIndex((section) => section.title.toLowerCase().includes(normalized));
 }
 
 function findSection(sections: SectionBlock[], query: string) {
-  const normalized = query.toLowerCase();
-  return sections.find((section) => section.title.toLowerCase().includes(normalized));
+  const index = findSectionIndex(sections, query);
+  return index === -1 ? undefined : sections[index];
 }
 
 function extractMilestones(section: SectionBlock | undefined): SpecMilestone[] {
@@ -100,9 +165,9 @@ function extractMilestones(section: SectionBlock | undefined): SpecMilestone[] {
       continue;
     }
 
-    const bulletMatch = line.match(BULLET_PATTERN);
+    const bulletMatch = line.match(LIST_PATTERN);
     if (bulletMatch && current) {
-      current.tasks.push(bulletMatch[1].trim());
+      current.tasks.push(cleanExtractedText(bulletMatch[1]));
     }
   }
 
@@ -113,7 +178,10 @@ function extractMilestones(section: SectionBlock | undefined): SpecMilestone[] {
   return milestones;
 }
 
-function extractEpics(section: SectionBlock | undefined): SpecEpic[] {
+function extractEpics(
+  section: SectionBlock | undefined,
+  milestoneName: string | null = null,
+): SpecEpic[] {
   if (!section) {
     return [];
   }
@@ -135,13 +203,14 @@ function extractEpics(section: SectionBlock | undefined): SpecEpic[] {
       current = {
         name: epicMatch[1].trim(),
         tasks: [],
+        milestoneName,
       };
       continue;
     }
 
-    const bulletMatch = line.match(BULLET_PATTERN);
+    const bulletMatch = line.match(LIST_PATTERN);
     if (bulletMatch && current) {
-      current.tasks.push(bulletMatch[1].trim());
+      current.tasks.push(cleanExtractedText(bulletMatch[1]));
     }
   }
 
@@ -152,12 +221,136 @@ function extractEpics(section: SectionBlock | undefined): SpecEpic[] {
   return epics;
 }
 
+function normalizeTitleKey(value: string | null | undefined) {
+  return cleanExtractedText(value ?? "").toLowerCase();
+}
+
 function unique(values: string[]) {
-  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+  return [...new Set(values.map((value) => cleanExtractedText(value)).filter(Boolean))];
+}
+
+function mergeEpics(primary: SpecEpic[], secondary: SpecEpic[]) {
+  const merged: SpecEpic[] = [];
+  const indexesByName = new Map<string, number>();
+
+  for (const epic of [...primary, ...secondary]) {
+    const key = normalizeTitleKey(epic.name);
+    const existingIndex = indexesByName.get(key);
+
+    if (existingIndex === undefined) {
+      merged.push({
+        ...epic,
+        milestoneName: epic.milestoneName ?? null,
+        tasks: unique(epic.tasks),
+      });
+      indexesByName.set(key, merged.length - 1);
+      continue;
+    }
+
+    const existing = merged[existingIndex];
+    merged[existingIndex] = {
+      ...existing,
+      milestoneName: existing.milestoneName ?? epic.milestoneName ?? null,
+      tasks: unique([...existing.tasks, ...epic.tasks]),
+    };
+  }
+
+  return merged.filter((epic) => epic.tasks.length > 0);
+}
+
+function collectSentenceCandidates(body: string) {
+  return unique(
+    body
+      .split(/\r?\n/)
+      .map((line) => cleanExtractedText(line))
+      .filter(Boolean)
+      .filter((line) => !LIST_PATTERN.test(line))
+      .flatMap((line) =>
+        line
+          .split(/(?<=[.!?])\s+/)
+          .map((sentence) => cleanExtractedText(sentence))
+          .filter((sentence) => sentence.length >= 24 && sentence.length <= 160),
+      ),
+  );
+}
+
+function isMetaTopLevelSection(title: string) {
+  const normalized = title.toLowerCase();
+  return (
+    normalized.includes("executive summary") ||
+    normalized.includes("overview") ||
+    normalized.includes("appendix") ||
+    normalized.includes("references")
+  );
+}
+
+function deriveTasksFromSection(
+  sections: SectionBlock[],
+  index: number,
+  maxTasks = 6,
+) {
+  const section = sections[index];
+  const descendants = sectionDescendants(sections, index);
+  const immediateChildTitles = descendants
+    .filter((candidate) => candidate.level === section.level + 1)
+    .map((candidate) => candidate.title);
+  const descendantBullets = descendants
+    .filter((candidate) => candidate.level === section.level + 1)
+    .flatMap((candidate) => candidate.bullets);
+  const structuredCandidates = unique([
+    ...immediateChildTitles,
+    ...section.bullets,
+    ...descendantBullets,
+  ]);
+
+  if (structuredCandidates.length > 0) {
+    return structuredCandidates.slice(0, maxTasks);
+  }
+
+  return collectSentenceCandidates(section.body).slice(0, maxTasks);
+}
+
+function inferMilestonesFromHeadings(sections: SectionBlock[]): SpecMilestone[] {
+  return sections
+    .map((section, index) => ({ section, index }))
+    .filter(({ section }) => section.level === 2 && !isMetaTopLevelSection(section.title))
+    .map(({ section, index }) => ({
+      name: section.title,
+      tasks: deriveTasksFromSection(sections, index),
+    }))
+    .filter((milestone) => milestone.tasks.length > 0);
+}
+
+function inferEpicsFromHeadings(sections: SectionBlock[]): SpecEpic[] {
+  return sections
+    .map((section, index) => ({ section, index }))
+    .filter(({ section }) => section.level >= 3)
+    .map(({ section, index }) => {
+      const parentIndex = parentSectionIndex(sections, index);
+      const parentSection = parentIndex === null ? null : sections[parentIndex];
+
+      return {
+        name: section.title,
+        tasks: deriveTasksFromSection(sections, index, 5),
+        milestoneName:
+          parentSection && parentSection.level === 2 && !isMetaTopLevelSection(parentSection.title)
+            ? parentSection.title
+            : null,
+      };
+    })
+    .filter((epic) => epic.milestoneName !== null)
+    .filter((epic) => epic.tasks.length > 0);
 }
 
 function collectAcceptanceCriteria(sections: SectionBlock[]) {
   const explicit = findSection(sections, "MVP scope")?.bullets ?? [];
+  const promiseBullets = sections
+    .filter((section) =>
+      /\bpromise\b|\bacceptance criteria\b|\bsuccess criteria\b|\brequirements?\b/i.test(
+        section.title,
+      ),
+    )
+    .flatMap((section) => section.bullets);
   const implicit = sections.flatMap((section) =>
     section.body
       .split(/\r?\n/)
@@ -165,7 +358,7 @@ function collectAcceptanceCriteria(sections: SectionBlock[]) {
       .filter((line) => /\bmust\b|\brequired\b|\bblock\b/i.test(line)),
   );
 
-  return unique([...explicit, ...implicit]).slice(0, 18);
+  return unique([...explicit, ...promiseBullets, ...implicit]).slice(0, 18);
 }
 
 function collectRisks(sections: SectionBlock[]) {
@@ -185,18 +378,33 @@ function collectRisks(sections: SectionBlock[]) {
   ).slice(0, 12);
 }
 
-function collectOpenQuestions(section: SectionBlock | undefined) {
-  if (!section) {
-    return [];
-  }
+function collectOpenQuestions(sections: SectionBlock[]) {
+  const explicitSection = findSection(sections, "Open questions");
+  const explicit = explicitSection
+    ? [
+        ...explicitSection.bullets,
+        ...explicitSection.body
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter((line) => /\?$/.test(line)),
+      ]
+    : [];
 
-  return unique([
-    ...section.bullets,
-    ...section.body
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line) => /\?$/.test(line)),
-  ]);
+  const implicit = sections.flatMap((section) => {
+    const treatAllLinesAsQuestions = /\bopen questions?\b|\bunknowns?\b/i.test(section.title);
+    return [
+      ...(treatAllLinesAsQuestions ? section.bullets : []),
+      ...section.body
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(
+          (line) =>
+            (treatAllLinesAsQuestions && line.length > 0) || /\?$/.test(line),
+        ),
+    ];
+  });
+
+  return unique([...explicit, ...implicit]).slice(0, 12);
 }
 
 function collectEntities(text: string) {
@@ -273,11 +481,48 @@ export function getContentHash(content: string) {
 export function buildSpecIr(markdown: string): SpecIR {
   const sections = splitIntoSections(markdown);
   const outline = extractOutline(markdown);
-  const milestones = extractMilestones(
-    findSection(sections, "Implementation plan broken into milestones"),
+  const inferredMilestones = inferMilestonesFromHeadings(sections);
+  const inferredEpics = inferEpicsFromHeadings(sections);
+  const explicitMilestoneSection = findSection(
+    sections,
+    "Implementation plan broken into milestones",
   );
-  const epics = extractEpics(findSection(sections, "Detailed backlog / epics / tasks"));
-  const openQuestions = collectOpenQuestions(findSection(sections, "Open questions"));
+  const explicitEpicSectionIndex = findSectionIndex(
+    sections,
+    "Detailed backlog / epics / tasks",
+  );
+  const explicitEpicSection =
+    explicitEpicSectionIndex === -1 ? undefined : sections[explicitEpicSectionIndex];
+  const explicitEpicParentIndex =
+    explicitEpicSectionIndex === -1
+      ? null
+      : parentSectionIndex(sections, explicitEpicSectionIndex);
+  const explicitEpicMilestoneName =
+    explicitEpicParentIndex !== null &&
+    sections[explicitEpicParentIndex] &&
+    sections[explicitEpicParentIndex].level === 2 &&
+    !isMetaTopLevelSection(sections[explicitEpicParentIndex].title)
+      ? sections[explicitEpicParentIndex].title
+      : null;
+  const explicitMilestones = extractMilestones(explicitMilestoneSection);
+  const explicitEpics = extractEpics(explicitEpicSection, explicitEpicMilestoneName);
+  const markdownH2Count = countMarkdownHeadings(markdown, 2);
+  const markdownH3Count = countMarkdownHeadings(markdown, 3);
+  const preferHeadingStructure =
+    markdownH2Count >= 2 || (markdownH2Count >= 1 && markdownH3Count >= 1);
+  const milestones =
+    preferHeadingStructure && inferredMilestones.length > 0
+      ? inferredMilestones
+      : explicitMilestones.length > 0
+        ? explicitMilestones
+        : inferredMilestones;
+  const epics =
+    preferHeadingStructure
+      ? mergeEpics(inferredEpics, explicitEpics)
+      : explicitEpics.length > 0
+        ? mergeEpics(explicitEpics, inferredEpics)
+        : mergeEpics(inferredEpics, explicitEpics);
+  const openQuestions = collectOpenQuestions(sections);
   const acceptanceCriteria = collectAcceptanceCriteria(sections);
   const integrations = collectIntegrations(markdown);
   const risks = collectRisks(sections);

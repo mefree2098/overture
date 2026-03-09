@@ -1,27 +1,46 @@
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-import { spawn } from "node:child_process";
-import path from "node:path";
 import { NextResponse } from "next/server";
+import { appendAuditEvent, getProjectSnapshot } from "@/lib/server/repository";
+import { startSymphonyForProject } from "@/lib/server/symphony-manager";
 
 export async function POST(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ projectId: string }> },
 ) {
   const { projectId } = await context.params;
-  const runnerPath = path.join(process.cwd(), "scripts", "runner.ts");
+  const snapshot = getProjectSnapshot(projectId);
 
-  const child = spawn(process.execPath, ["--import", "tsx", runnerPath, projectId], {
-    cwd: process.cwd(),
-    detached: true,
-    stdio: "ignore",
+  if (!snapshot) {
+    return NextResponse.json(
+      {
+        error: "Project not found.",
+      },
+      { status: 404 },
+    );
+  }
+
+  const symphony = await startSymphonyForProject(
+    snapshot.project,
+    new URL(request.url).origin,
+  );
+
+  appendAuditEvent({
+    projectId,
+    actor: "control-plane",
+    action: "symphony.started",
+    detail: `Symphony attached on port ${symphony.port} for ${snapshot.project.slug}.`,
+    payload: {
+      port: symphony.port,
+      pid: symphony.pid,
+      workflowPath: symphony.workflowPath,
+    },
   });
-
-  child.unref();
 
   return NextResponse.json({
     ok: true,
     projectId,
+    symphony,
   });
 }

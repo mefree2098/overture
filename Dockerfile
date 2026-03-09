@@ -11,6 +11,18 @@ COPY . .
 RUN npm run build
 
 FROM base AS runner
+ARG CODEX_CLI_VERSION=0.112.0
+ENV PORT=3000
+ENV OVERTURE_BIND_HOST=0.0.0.0
+ENV OVERTURE_ROOT=/app
+ENV CODEX_HOME=/app/.overture/codex-home
+ENV OVERTURE_MIX_BIN=/usr/bin/mix
+ENV OVERTURE_SYMPHONY_BIN=/app/vendor/symphony/elixir/bin/symphony
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates elixir git \
+  && rm -rf /var/lib/apt/lists/*
+RUN npm install -g @openai/codex@${CODEX_CLI_VERSION} \
+  && codex --version
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
@@ -20,6 +32,7 @@ COPY --from=builder /app/next.config.ts ./next.config.ts
 COPY --from=builder /app/scripts ./scripts
 COPY --from=builder /app/plan.md ./plan.md
 COPY --from=builder /app/src ./src
+COPY --from=builder /app/vendor ./vendor
 COPY --from=builder /app/playwright.config.ts ./playwright.config.ts
 COPY --from=builder /app/tsconfig.json ./tsconfig.json
 COPY --from=builder /app/vitest.config.ts ./vitest.config.ts
@@ -28,4 +41,4 @@ USER node
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:3000/api/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"
 EXPOSE 3000
-CMD ["node", ".next/standalone/server.js"]
+CMD ["sh", "scripts/docker/start-overture.sh"]

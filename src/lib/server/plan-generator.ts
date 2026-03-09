@@ -95,12 +95,25 @@ function createEdge(
 export function generatePlanFromSpec(specIr: SpecIR): PlanGenerationResult {
   const workItems: GeneratedWorkItem[] = [];
   const dependencyEdges: GeneratedDependencyEdge[] = [];
+  const milestoneIdsByName = new Map<string, string>();
+  const epicNamesByMilestone = new Map<string, Set<string>>();
   let sortOrder = 0;
   let edgeOrder = 0;
   let previousMilestoneId: string | null = null;
 
+  specIr.epics.forEach((epic) => {
+    if (!epic.milestoneName) {
+      return;
+    }
+
+    const names = epicNamesByMilestone.get(epic.milestoneName) ?? new Set<string>();
+    names.add(epic.name);
+    epicNamesByMilestone.set(epic.milestoneName, names);
+  });
+
   specIr.milestones.forEach((milestone, milestoneIndex) => {
     const milestoneId = makeId("milestone", milestoneIndex);
+    const attachedEpicNames = epicNamesByMilestone.get(milestone.name) ?? new Set<string>();
     workItems.push(
       createWorkItem({
         id: milestoneId,
@@ -118,13 +131,16 @@ export function generatePlanFromSpec(specIr: SpecIR): PlanGenerationResult {
         },
       }),
     );
+    milestoneIdsByName.set(milestone.name, milestoneId);
 
     if (previousMilestoneId) {
       dependencyEdges.push(createEdge(edgeOrder++, previousMilestoneId, milestoneId));
     }
 
     let previousTaskId: string | null = milestoneId;
-    milestone.tasks.forEach((taskTitle, taskIndex) => {
+    milestone.tasks
+      .filter((taskTitle) => !attachedEpicNames.has(taskTitle))
+      .forEach((taskTitle, taskIndex) => {
       const taskId = makeId(`milestone-${milestoneIndex + 1}-task`, taskIndex);
       workItems.push(
         createWorkItem({
@@ -149,13 +165,17 @@ export function generatePlanFromSpec(specIr: SpecIR): PlanGenerationResult {
         dependencyEdges.push(createEdge(edgeOrder++, previousTaskId, taskId));
       }
       previousTaskId = taskId;
-    });
+      });
 
     previousMilestoneId = milestoneId;
   });
 
   specIr.epics.forEach((epic, epicIndex) => {
     const epicId = makeId("epic", epicIndex);
+    const milestoneParentId = epic.milestoneName
+      ? milestoneIdsByName.get(epic.milestoneName) ?? null
+      : null;
+
     workItems.push(
       createWorkItem({
         id: epicId,
@@ -166,13 +186,19 @@ export function generatePlanFromSpec(specIr: SpecIR): PlanGenerationResult {
         status: "blocked",
         priority: 3,
         sortOrder: sortOrder++,
+        parentId: milestoneParentId,
         acceptanceCriteria: epic.tasks.slice(0, 4),
         metadata: {
           lane: "epic",
           injected: false,
+          milestoneName: epic.milestoneName ?? null,
         },
       }),
     );
+
+    if (milestoneParentId) {
+      dependencyEdges.push(createEdge(edgeOrder++, milestoneParentId, epicId));
+    }
 
     epic.tasks.forEach((taskTitle, taskIndex) => {
       const taskId = makeId(`epic-${epicIndex + 1}-task`, taskIndex);
@@ -196,7 +222,7 @@ export function generatePlanFromSpec(specIr: SpecIR): PlanGenerationResult {
       );
 
       dependencyEdges.push(createEdge(edgeOrder++, epicId, taskId));
-      if (previousMilestoneId) {
+      if (!milestoneParentId && previousMilestoneId) {
         dependencyEdges.push(createEdge(edgeOrder++, previousMilestoneId, epicId));
       }
     });

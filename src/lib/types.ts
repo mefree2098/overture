@@ -47,6 +47,7 @@ export interface SpecMilestone {
 export interface SpecEpic {
   name: string;
   tasks: string[];
+  milestoneName?: string | null;
 }
 
 export interface SpecIR {
@@ -234,11 +235,34 @@ export interface TrackerIssue {
   identifier: string;
   title: string;
   description: string;
+  priority: number | null;
   stateName: TrackerStateName;
   stateId: string;
+  branchName: string | null;
+  assigneeId: string | null;
+  labels: string[];
+  blockedBy: Array<{
+    id: string;
+    identifier: string;
+    stateName: string | null;
+  }>;
   projectSlug: string;
   url: string;
+  createdAt: string;
   updatedAt: string;
+}
+
+export interface SymphonyRuntimeRecord {
+  pid: number;
+  port: number;
+  workflowPath: string;
+  logsRoot: string;
+  bootstrapLogPath: string;
+  stateUrl: string;
+  startedAt: string;
+  running: boolean;
+  state: Record<string, unknown> | null;
+  bootstrapTail: string[];
 }
 
 export interface ProjectSummary {
@@ -259,6 +283,7 @@ export interface ProjectSnapshot extends ProjectSummary {
   findings: FindingRecord[];
   auditEvents: AuditEventRecord[];
   trackerIssues: TrackerIssue[];
+  symphony: SymphonyRuntimeRecord | null;
 }
 
 export interface CreateProjectInput {
