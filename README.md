@@ -128,6 +128,19 @@ npm run runner -- <project-id>
 
 The project page shows live Symphony runtime state, bootstrap logs, retry queues, tracker slices, artifacts, findings, and gate status.
 
+## Run another project
+
+For a fresh project run:
+
+1. Delete the old project from the home dashboard or project page if you want a clean slate.
+2. Open the intake form on `/`.
+3. Enter a new project name and repo source.
+4. Paste or upload the next markdown blueprint.
+5. Click `Compile execution graph`.
+6. Open the new project page and click `Launch Symphony`.
+
+You can also create a project programmatically with `POST /api/projects` and then start execution with `POST /api/projects/:projectId/execute`.
+
 ## Delete a project
 
 Project deletion is available in two places:
@@ -169,6 +182,14 @@ npm run security
 ZAP_TARGET_URL=http://127.0.0.1:3000 npm run security:zap
 npm audit --audit-level=high
 ```
+
+For a fast manual smoke after launching the app:
+
+1. Open `/`.
+2. Create or open a project.
+3. Verify `/api/health` returns `ok: true`.
+4. Launch Symphony from the project page.
+5. Confirm the runtime panel switches to `Runtime live`.
 
 ## Docker deployment
 
