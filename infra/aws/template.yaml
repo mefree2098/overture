@@ -1,0 +1,50 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Overture control plane baseline deployment
+
+Resources:
+  OvertureKmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: Customer managed key for Overture state encryption
+      EnableKeyRotation: true
+
+  OvertureFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: overture-control-plane
+      Runtime: nodejs22.x
+      Handler: index.handler
+      Role: arn:aws:iam::123456789012:role/overture-lambda-role
+      Code:
+        ZipFile: |
+          exports.handler = async () => ({
+            statusCode: 200,
+            body: JSON.stringify({ ok: true }),
+          });
+      Timeout: 30
+      MemorySize: 512
+      TracingConfig:
+        Mode: Active
+
+  OvertureTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !GetAtt OvertureKmsKey.Arn
+
+Outputs:
+  FunctionName:
+    Value: !Ref OvertureFunction
+  TableName:
+    Value: !Ref OvertureTable

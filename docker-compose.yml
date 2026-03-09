@@ -1,0 +1,17 @@
+services:
+  overture:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      HOSTNAME: 0.0.0.0
+      PORT: 3000
+    volumes:
+      - overture_data:/app/.overture
+
+volumes:
+  overture_data:
