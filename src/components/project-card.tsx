@@ -55,9 +55,7 @@ export function ProjectCard({ summary }: { summary: ProjectSummary }) {
             <div className="flex items-center gap-2 text-[var(--color-muted)]">
               <FolderKanban className="h-4 w-4 text-[var(--color-accent)]" />
               <span className="font-mono text-[11px] uppercase tracking-[0.24em]">
-                {summary.project.executionMode === "local_chatgpt"
-                  ? "Local ChatGPT Codex"
-                  : "Hosted API Codex"}
+                Saved project
               </span>
             </div>
             <h3 className="holo-text text-3xl font-semibold text-[var(--color-ink)]">
@@ -82,7 +80,7 @@ export function ProjectCard({ summary }: { summary: ProjectSummary }) {
         </div>
       </div>
 
-      <div className="mt-6 grid grid-cols-2 gap-4 text-sm text-[var(--color-muted)]">
+        <div className="mt-6 grid grid-cols-2 gap-4 text-sm text-[var(--color-muted)]">
         <div className="rounded-[22px] border border-white/8 bg-white/4 p-4">
           <p className="font-mono text-[11px] uppercase tracking-[0.22em]">
             Current step
@@ -93,15 +91,15 @@ export function ProjectCard({ summary }: { summary: ProjectSummary }) {
         </div>
         <div className="rounded-[22px] border border-white/8 bg-white/4 p-4">
           <p className="font-mono text-[11px] uppercase tracking-[0.22em]">
-            Failing gates
+            Ready to release
           </p>
           <p className="mt-2 text-base text-[var(--color-ink)]">
-            {summary.failingGates}
+            {summary.gateStatus.releaseStatus === "pass" ? "Yes" : "Not yet"}
           </p>
         </div>
         <div className="rounded-[22px] border border-white/8 bg-white/4 p-4">
           <p className="font-mono text-[11px] uppercase tracking-[0.22em]">
-            Completed tasks
+            Finished tasks
           </p>
           <p className="mt-2 text-base text-[var(--color-ink)]">
             {summary.counts.done + summary.counts.waived}

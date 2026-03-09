@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { Settings2 } from "lucide-react";
 import { IBM_Plex_Mono, Oxanium } from "next/font/google";
 import "./globals.css";
 
@@ -37,36 +38,32 @@ export default function RootLayout({
           <div className="mx-auto min-h-screen max-w-[1720px] px-4 py-5 sm:px-6 lg:px-8">
             <header className="panel halo-ring mb-6 flex flex-col gap-4 rounded-[34px] px-5 py-5 md:flex-row md:items-center md:justify-between">
               <div>
-                <Link href="/" className="inline-flex items-center gap-4 text-sm text-[var(--color-muted)]">
+                <Link
+                  href="/"
+                  className="inline-flex items-center gap-4 text-sm text-[var(--color-muted)]"
+                >
                   <span className="grid h-14 w-14 place-items-center rounded-[22px] border border-white/10 bg-[linear-gradient(160deg,rgba(123,240,255,0.28),rgba(143,166,255,0.14))] text-lg font-semibold text-[var(--color-ink)] shadow-[0_0_34px_rgba(123,240,255,0.18)]">
                     OV
                   </span>
                   <span>
                     <span className="block font-mono text-[11px] uppercase tracking-[0.38em] text-[var(--color-accent)]">
-                      AI Project Runner
+                      From Plan To Finished Run
                     </span>
                     <span className="block holo-text text-2xl font-semibold text-[var(--color-ink)]">
                       Overture
                     </span>
                     <span className="mt-1 block text-sm text-[var(--color-muted)]">
-                      Turn a written plan into a tracked, automated build and review run.
+                      Turn a written plan into an automated build, test, and review workflow.
                     </span>
                   </span>
                 </Link>
               </div>
               <div className="flex flex-col gap-3 md:items-end">
-                <div className="flex flex-wrap items-center gap-2 font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--color-muted)]">
-                  <span className="rounded-full border border-[var(--color-border)] bg-white/4 px-4 py-2">
-                    Planner: Codex
-                  </span>
-                  <span className="rounded-full border border-[var(--color-border)] bg-white/4 px-4 py-2">
-                    Executor: Symphony
-                  </span>
-                  <span className="rounded-full border border-[var(--color-border)] bg-white/4 px-4 py-2">
-                    Tracking: Built in
-                  </span>
+                <div className="rounded-full border border-[var(--color-border)] bg-white/4 px-4 py-2 text-sm text-[var(--color-muted)]">
+                  Best for first-time users: start on the home page, paste a plan, then review the
+                  new project before starting the automated run.
                 </div>
-                <nav className="flex flex-wrap items-center gap-2 font-mono text-[12px] uppercase tracking-[0.22em] text-[var(--color-muted)]">
+                <nav className="flex flex-wrap items-center gap-2 text-sm font-semibold text-[var(--color-muted)]">
                   <Link
                     href="/"
                     className="rounded-full border border-[var(--color-border)] bg-white/6 px-4 py-2 transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
@@ -75,8 +72,9 @@ export default function RootLayout({
                   </Link>
                   <Link
                     href="/settings"
-                    className="rounded-full border border-[var(--color-border)] bg-white/6 px-4 py-2 transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+                    className="inline-flex items-center gap-2 rounded-full border border-[var(--color-border)] bg-white/6 px-4 py-2 transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
                   >
+                    <Settings2 className="h-4 w-4" />
                     Settings
                   </Link>
                 </nav>

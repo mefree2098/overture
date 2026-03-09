@@ -1,6 +1,9 @@
-FROM node:22-bookworm-slim AS base
+FROM node:22-bookworm-slim AS nodebase
+
+FROM elixir:1.19.1-otp-28-slim AS base
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
+COPY --from=nodebase /usr/local/ /usr/local/
 
 FROM base AS deps
 COPY package.json package-lock.json ./
@@ -16,11 +19,13 @@ ENV PORT=3000
 ENV OVERTURE_BIND_HOST=0.0.0.0
 ENV OVERTURE_ROOT=/app
 ENV CODEX_HOME=/app/.overture/codex-home
-ENV OVERTURE_MIX_BIN=/usr/bin/mix
+ENV OVERTURE_MIX_BIN=/usr/local/bin/mix
 ENV OVERTURE_SYMPHONY_BIN=/app/vendor/symphony/elixir/bin/symphony
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates elixir git \
+  && apt-get install -y --no-install-recommends ca-certificates git \
   && rm -rf /var/lib/apt/lists/*
+RUN groupadd --gid 1000 node \
+  && useradd --uid 1000 --gid 1000 --create-home --shell /bin/bash node
 RUN npm install -g @openai/codex@${CODEX_CLI_VERSION} \
   && codex --version
 COPY --from=deps /app/node_modules ./node_modules
@@ -36,6 +41,13 @@ COPY --from=builder /app/vendor ./vendor
 COPY --from=builder /app/playwright.config.ts ./playwright.config.ts
 COPY --from=builder /app/tsconfig.json ./tsconfig.json
 COPY --from=builder /app/vitest.config.ts ./vitest.config.ts
+RUN rm -rf /app/vendor/symphony/elixir/_build /app/vendor/symphony/elixir/deps \
+  && rm -f /app/vendor/symphony/elixir/bin/symphony \
+  && cd /app/vendor/symphony/elixir \
+  && mix local.hex --force \
+  && mix local.rebar --force \
+  && HEX_HTTP_CONCURRENCY=1 HEX_HTTP_TIMEOUT=120 mix setup \
+  && mix build
 RUN mkdir -p /app/.overture && chown -R node:node /app
 USER node
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

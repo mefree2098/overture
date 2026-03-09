@@ -18,6 +18,20 @@ import type {
   PlannerReasoningEffort,
 } from "@/lib/types";
 
+const STARTER_TEMPLATE = `# Project plan
+
+## Goal
+Describe what you want built or improved.
+
+## Main areas
+- Product experience
+- Core functionality
+- Quality checks
+- Deployment and launch
+
+## Notes
+Paste any research notes, requirements, risks, or ideas here.`;
+
 function modeIsAvailable(
   mode: ExecutionMode,
   executionSupport: {
@@ -140,48 +154,76 @@ export function ProjectCreateForm({
         <div className="space-y-6">
           <div className="space-y-3">
             <span className="inline-flex rounded-full border border-[var(--color-border)] bg-white/6 px-4 py-2 font-mono text-[11px] uppercase tracking-[0.3em] text-[var(--color-accent)]">
-              Create a project
+              Start a new project
             </span>
             <h2 className="text-balance text-4xl font-semibold text-[var(--color-ink)] lg:text-5xl">
-              Build a project from a written plan.
+              Start with just a name and your plan.
             </h2>
             <p className="max-w-3xl text-base leading-8 text-[var(--color-muted)]">
-              Start with a project name and your markdown plan. Overture will turn it into tasks,
-              safety checks, and a runnable workflow automatically.
+              Overture will read the document, build the task list, and set up the automated run
+              for you. You only need to fill in the basics here.
             </p>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <label className="space-y-2">
-              <span className="text-sm font-semibold text-[var(--color-ink)]">
-                Step 1: project name
-              </span>
-              <p className="text-sm leading-6 text-[var(--color-muted)]">
-                Use the name you want to see on the dashboard.
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="rounded-[24px] border border-white/8 bg-white/4 p-5">
+              <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--color-accent)]">
+                Step 1
               </p>
-              <input
-                aria-label="Project name"
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                placeholder="Example: PenPal AI"
-                className="glass-input w-full rounded-[22px] px-4 py-3"
-              />
-            </label>
+              <p className="mt-3 text-base font-semibold text-[var(--color-ink)]">
+                Name the project
+              </p>
+              <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">
+                Pick a clear name you will recognize later.
+              </p>
+            </div>
+            <div className="rounded-[24px] border border-white/8 bg-white/4 p-5">
+              <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--color-accent)]">
+                Step 2
+              </p>
+              <p className="mt-3 text-base font-semibold text-[var(--color-ink)]">
+                Paste the plan
+              </p>
+              <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">
+                Upload the markdown file or paste the text directly.
+              </p>
+            </div>
+            <div className="rounded-[24px] border border-white/8 bg-white/4 p-5">
+              <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--color-accent)]">
+                Step 3
+              </p>
+              <p className="mt-3 text-base font-semibold text-[var(--color-ink)]">
+                Review and start
+              </p>
+              <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">
+                Overture creates the project page and you choose when to start the run.
+              </p>
+            </div>
+          </div>
 
-            <label className="space-y-2">
-              <span className="text-sm font-semibold text-[var(--color-ink)]">
-                Repository or folder
-              </span>
-              <p className="text-sm leading-6 text-[var(--color-muted)]">
-                This is where Symphony will work when the project run starts.
-              </p>
-              <input
-                aria-label="Repo source"
-                value={repoSource}
-                onChange={(event) => setRepoSource(event.target.value)}
-                className="glass-input w-full rounded-[22px] px-4 py-3"
-              />
-            </label>
+          <label className="space-y-2">
+            <span className="text-sm font-semibold text-[var(--color-ink)]">
+              Step 1: project name
+            </span>
+            <p className="text-sm leading-6 text-[var(--color-muted)]">
+              Use the name you want to see on the dashboard.
+            </p>
+            <input
+              aria-label="Project name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="Example: PenPal AI"
+              className="glass-input w-full rounded-[22px] px-4 py-3"
+            />
+          </label>
+
+          <div className="rounded-[24px] border border-white/8 bg-white/4 p-4 text-sm leading-7 text-[var(--color-muted)]">
+            Overture will use your saved project folder setting by default:
+            <span className="ml-2 font-semibold text-[var(--color-ink)]">
+              {appSettings.defaultRepoSource || process.env.NEXT_PUBLIC_DEFAULT_REPO || "."}
+            </span>
+            . If you need a different folder or Git repository for this project, you can change it
+            in <span className="font-semibold text-[var(--color-ink)]">Advanced project options</span>.
           </div>
 
           <div className="space-y-3">
@@ -191,13 +233,24 @@ export function ProjectCreateForm({
                   Step 2: add your markdown plan
                 </p>
                 <p className="text-sm leading-6 text-[var(--color-muted)]">
-                  Paste the plan directly or upload a `.md` file.
+                  Paste the plan directly or upload a `.md` file. You do not need to clean up
+                  citations or make it look perfect first.
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="rounded-full border border-[var(--color-border)] bg-white/6 px-4 py-2 font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--color-muted)]">
                   {specFilename}
                 </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSpecFilename("starter-plan.md");
+                    setSpecText(STARTER_TEMPLATE);
+                  }}
+                  className="rounded-full border border-[var(--color-border)] bg-white/6 px-4 py-2 text-sm font-semibold text-[var(--color-muted)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-ink)]"
+                >
+                  Use starter outline
+                </button>
                 <label className="glass-button inline-flex cursor-pointer items-center gap-2 rounded-full px-4 py-2 text-sm transition">
                   <FileText className="h-4 w-4" />
                   Upload file
@@ -217,8 +270,12 @@ export function ProjectCreateForm({
               value={specText}
               onChange={(event) => setSpecText(event.target.value)}
               placeholder={`# Your project plan\n\n## Goal\nDescribe the product or outcome.\n\n## Major sections\nAdd the main areas, milestones, requirements, risks, or research notes.\n\n## Notes\nMessy research notes are okay. Overture will organize them.`}
-              className="glass-input fine-scrollbar min-h-[360px] w-full rounded-[30px] px-4 py-4 text-sm leading-7"
+              className="glass-input fine-scrollbar min-h-[300px] w-full rounded-[30px] px-4 py-4 text-sm leading-7"
             />
+            <p className="text-sm text-[var(--color-muted)]">
+              Tip: deep research plans, rough notes, and long markdown documents are all valid
+              inputs here.
+            </p>
           </div>
 
           <details className="rounded-[28px] border border-white/8 bg-white/4 p-5">
@@ -227,13 +284,28 @@ export function ProjectCreateForm({
               <ChevronDown className="h-4 w-4 text-[var(--color-muted)]" />
             </summary>
             <div className="mt-5 grid gap-5 lg:grid-cols-2">
+              <label className="space-y-2 lg:col-span-2">
+                <span className="text-sm font-semibold text-[var(--color-ink)]">
+                  Project folder or Git repository
+                </span>
+                <p className="text-sm leading-6 text-[var(--color-muted)]">
+                  This is where the automated run will work after you start it.
+                </p>
+                <input
+                  aria-label="Repo source"
+                  value={repoSource}
+                  onChange={(event) => setRepoSource(event.target.value)}
+                  className="glass-input w-full rounded-[22px] px-4 py-3"
+                />
+              </label>
+
               <label className="space-y-2">
                 <span className="text-sm font-semibold text-[var(--color-ink)]">
                   Run mode
                 </span>
                 <p className="text-sm leading-6 text-[var(--color-muted)]">
-                  Choose whether this project should use your local ChatGPT Codex login or API-key
-                  mode.
+                  Choose whether this project should use your local ChatGPT Codex login or hosted
+                  API mode.
                 </p>
                 <select
                   value={executionMode}
@@ -259,7 +331,7 @@ export function ProjectCreateForm({
                   Planning depth
                 </span>
                 <p className="text-sm leading-6 text-[var(--color-muted)]">
-                  Controls how much reasoning effort Codex spends while creating the plan.
+                  Controls how much extra thinking Codex spends while creating the plan.
                 </p>
                 <select
                   value={plannerReasoningEffort}
@@ -281,7 +353,7 @@ export function ProjectCreateForm({
                   Planning model
                 </span>
                 <p className="text-sm leading-6 text-[var(--color-muted)]">
-                  Leave blank to let the Codex CLI choose its default model.
+                  Leave blank to use the saved default model from Settings.
                 </p>
                 <input
                   value={plannerModel}
@@ -296,7 +368,7 @@ export function ProjectCreateForm({
                   Execution model
                 </span>
                 <p className="text-sm leading-6 text-[var(--color-muted)]">
-                  Leave blank to let the Codex CLI choose its default model.
+                  Leave blank to use the saved default model from Settings.
                 </p>
                 <input
                   value={executionModel}
@@ -390,10 +462,10 @@ export function ProjectCreateForm({
               ) : (
                 <Rocket className="h-4 w-4" />
               )}
-              {submitting ? "Building project..." : "Create project"}
+              {submitting ? "Creating your project..." : "Turn this plan into a project"}
             </button>
             <p className="text-sm text-[var(--color-muted)]">
-              Most plans take about 20 to 60 seconds to organize.
+              Most plans take about 20 to 60 seconds to organize into milestones and tasks.
             </p>
           </div>
 
@@ -408,33 +480,34 @@ export function ProjectCreateForm({
               </div>
               <div>
                 <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--color-accent)]">
-                  What happens next
+                  What Overture does for you
                 </p>
                 <h3 className="mt-2 text-2xl font-semibold text-[var(--color-ink)]">
-                  Overture handles the setup for you.
+                  You do not have to manage the process manually.
                 </h3>
               </div>
             </div>
 
             <div className="mt-5 space-y-3 text-sm leading-7 text-[var(--color-muted)]">
               <div className="rounded-[22px] border border-white/8 bg-white/4 p-4">
-                <p className="font-semibold text-[var(--color-ink)]">First</p>
+                <p className="font-semibold text-[var(--color-ink)]">1. Planning</p>
                 <p className="mt-2">
-                  Codex reads your plan and turns it into milestones, tasks, risks, and gates.
+                  Codex reads your plan and turns it into milestones, tasks, risks, and quality
+                  gates.
                 </p>
               </div>
               <div className="rounded-[22px] border border-white/8 bg-white/4 p-4">
-                <p className="font-semibold text-[var(--color-ink)]">Then</p>
+                <p className="font-semibold text-[var(--color-ink)]">2. Review</p>
                 <p className="mt-2">
-                  Overture creates a project page where you can review the plan before launching the
-                  run.
+                  Overture creates a project page where you can review the generated work before
+                  starting anything.
                 </p>
               </div>
               <div className="rounded-[22px] border border-white/8 bg-white/4 p-4">
-                <p className="font-semibold text-[var(--color-ink)]">Finally</p>
+                <p className="font-semibold text-[var(--color-ink)]">3. Automated run</p>
                 <p className="mt-2">
-                  Symphony works through the queued tickets while Overture keeps the evidence and
-                  health checks organized.
+                  When you start the run, Symphony works through the queue while Overture keeps the
+                  progress, evidence, and final checks organized.
                 </p>
               </div>
             </div>
@@ -444,10 +517,10 @@ export function ProjectCreateForm({
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--color-muted)]">
-                  Current defaults
+                  Saved defaults
                 </p>
                 <p className="mt-2 text-sm text-[var(--color-muted)]">
-                  These come from your platform settings.
+                  New projects use these unless you change them in Advanced project options.
                 </p>
               </div>
               <Link
@@ -477,11 +550,10 @@ export function ProjectCreateForm({
 
           <div className="panel rounded-[30px] p-6">
             <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--color-muted)]">
-              Detected headings
+              Plan preview
             </p>
             <p className="mt-2 text-sm text-[var(--color-muted)]">
-              Overture can usually work with messy research notes as long as the document has some
-              structure.
+              As you paste text, Overture previews the main headings it can see in the document.
             </p>
 
             <div className="mt-4 space-y-3">
@@ -497,7 +569,7 @@ export function ProjectCreateForm({
                 ))
               ) : (
                 <div className="rounded-[20px] border border-dashed border-white/10 bg-white/3 px-4 py-6 text-sm text-[var(--color-muted)]">
-                  Paste a plan and Overture will preview the heading structure here.
+                  Paste a plan and Overture will preview the section structure here.
                 </div>
               )}
             </div>

@@ -371,9 +371,20 @@ function computeProjectHealth(
 
   if (
     gateStatus.qaStatus === "fail" ||
-    gateStatus.deployStatus === "fail" ||
-    counts.blocked > counts.done
+    gateStatus.deployStatus === "fail"
   ) {
+    return "at_risk" as const;
+  }
+
+  const runnableCount =
+    counts.queued + counts.in_progress + counts.awaiting_review + counts.verifying;
+  const terminalCount = counts.done + counts.waived;
+
+  if (counts.blocked > 0 && runnableCount === 0 && terminalCount === 0) {
+    return "blocked" as const;
+  }
+
+  if (counts.blocked > 0 && runnableCount === 0 && terminalCount > 0) {
     return "at_risk" as const;
   }
 
@@ -818,6 +829,36 @@ export async function deleteProject(projectId: string) {
   }
 
   return project;
+}
+
+export function updateProjectName(projectId: string, name: string) {
+  const db = getDb();
+  const timestamp = nowIso();
+  const normalizedName = name.trim();
+
+  if (!normalizedName) {
+    throw new Error("Project name is required.");
+  }
+
+  const existing = db
+    .prepare("SELECT * FROM projects WHERE id = ?")
+    .get(projectId) as Record<string, unknown> | undefined;
+
+  if (!existing) {
+    return null;
+  }
+
+  db.prepare(
+    `
+      UPDATE projects
+      SET name = ?, updated_at = ?, last_activity_at = ?
+      WHERE id = ?
+    `,
+  ).run(normalizedName, timestamp, timestamp, projectId);
+
+  return hydrateProject(
+    db.prepare("SELECT * FROM projects WHERE id = ?").get(projectId) as Record<string, unknown>,
+  );
 }
 
 export async function createProjectFromSpec(input: CreateProjectInput) {

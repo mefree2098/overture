@@ -12,16 +12,13 @@ export default function HomePage() {
   const projects = listProjects();
   const appSettings = getAppSettings();
   const executionSupport = getExecutionModeSupport();
-  const operatorSummary = {
+  const projectSummary = {
     projects: projects.length,
-    blocked: projects.filter((project) => project.project.health === "blocked").length,
-    openFindings: projects.reduce(
-      (total, project) => total + Number(project.gateStatus.summary.openFindings ?? 0),
-      0,
-    ),
-    releaseReady: projects.filter(
-      (project) => project.gateStatus.releaseStatus === "pass",
+    inProgress: projects.filter(
+      (project) => project.project.health === "on_track" || project.project.health === "at_risk",
     ).length,
+    releaseReady: projects.filter((project) => project.gateStatus.releaseStatus === "pass")
+      .length,
   };
 
   return (
@@ -34,12 +31,12 @@ export default function HomePage() {
             </div>
             <div className="space-y-4">
               <h1 className="holo-text max-w-4xl text-balance text-5xl font-semibold leading-tight text-[var(--color-ink)] lg:text-6xl">
-                Paste your plan. Overture turns it into a working project run.
+                Paste your plan. Overture turns it into a guided project run.
               </h1>
               <p className="max-w-3xl text-lg leading-8 text-[var(--color-muted)]">
-                You do not need to write tickets or manage agents yourself. Overture reads the plan,
-                breaks it into clear steps, and launches an automated run with testing, security,
-                and deployment checks built in.
+                You do not need to create tickets, coordinate agents, or remember the testing
+                steps. Overture reads the plan, organizes the work, and gives you a simple place
+                to start, monitor, and review the run.
               </p>
             </div>
 
@@ -49,7 +46,7 @@ export default function HomePage() {
                   1. Add your plan
                 </p>
                 <p className="mt-3 text-sm leading-7 text-[var(--color-muted)]">
-                  Paste a markdown plan or upload a file. Headings and notes are fine.
+                  Paste markdown or upload a file. Messy research notes are okay.
                 </p>
               </div>
               <div className="rounded-[26px] border border-white/8 bg-white/4 p-5">
@@ -57,7 +54,7 @@ export default function HomePage() {
                   2. Review the draft
                 </p>
                 <p className="mt-3 text-sm leading-7 text-[var(--color-muted)]">
-                  Overture builds milestones, tickets, risks, and quality gates from the plan.
+                  Overture turns the plan into milestones, tasks, and checklists you can read.
                 </p>
               </div>
               <div className="rounded-[26px] border border-white/8 bg-white/4 p-5">
@@ -65,7 +62,7 @@ export default function HomePage() {
                   3. Start the run
                 </p>
                 <p className="mt-3 text-sm leading-7 text-[var(--color-muted)]">
-                  Launch Symphony and track progress, evidence, and results from one place.
+                  Start the automated run and follow progress, results, and final evidence.
                 </p>
               </div>
             </div>
@@ -80,13 +77,14 @@ export default function HomePage() {
               </div>
               <div className="space-y-2">
                 <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--color-accent)]">
-                  Ready to create
+                  Before you begin
                 </p>
                 <h2 className="text-2xl font-semibold text-[var(--color-ink)]">
-                  Current platform defaults
+                  Overture is ready to plan and run projects
                 </h2>
                 <p className="text-sm leading-7 text-[var(--color-muted)]">
-                  New projects will start with these saved settings. You can change them anytime.
+                  If you want to change the model, run mode, or project defaults, use Settings.
+                  Otherwise you can stay on this page and start right away.
                 </p>
               </div>
             </div>
@@ -120,26 +118,29 @@ export default function HomePage() {
               </div>
               <div className="rounded-[24px] border border-white/8 bg-white/4 p-4">
                 <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--color-muted)]">
-                  Runtime status
+                  Account status
                 </p>
                 <p className="mt-2 text-base text-[var(--color-ink)]">
                   {executionSupport.localChatgptAvailable
-                    ? "ChatGPT auth ready"
+                    ? "Your ChatGPT Codex login is ready"
                     : executionSupport.hostedApiAvailable
-                      ? "API mode ready"
-                      : "Needs Codex login"}
+                      ? "Hosted API mode is ready"
+                      : "A Codex login is still needed"}
                 </p>
               </div>
             </div>
 
-            <div className="mt-5">
+            <div className="mt-5 flex flex-wrap items-center gap-3">
               <Link
                 href="/settings"
                 className="glass-button inline-flex items-center gap-2 rounded-full px-5 py-3 text-sm font-semibold transition"
               >
-                Open settings
+                Change settings
                 <Sparkles className="h-4 w-4" />
               </Link>
+              <span className="text-sm text-[var(--color-muted)]">
+                Settings control the default planning model, execution model, and run mode.
+              </span>
             </div>
           </div>
 
@@ -149,15 +150,15 @@ export default function HomePage() {
                 Projects
               </p>
               <p className="mt-3 text-3xl font-semibold text-[var(--color-ink)]">
-                {operatorSummary.projects}
+                {projectSummary.projects}
               </p>
             </div>
             <div className="metric-card rounded-[28px] p-5">
               <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--color-muted)]">
-                Open findings
+                In progress
               </p>
               <p className="mt-3 text-3xl font-semibold text-[var(--color-ink)]">
-                {operatorSummary.openFindings}
+                {projectSummary.inProgress}
               </p>
             </div>
             <div className="metric-card rounded-[28px] p-5">
@@ -165,7 +166,7 @@ export default function HomePage() {
                 Release ready
               </p>
               <p className="mt-3 text-3xl font-semibold text-[var(--color-ink)]">
-                {operatorSummary.releaseReady}
+                {projectSummary.releaseReady}
               </p>
             </div>
           </div>

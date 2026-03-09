@@ -6,6 +6,8 @@ const STATUS_STYLES: Record<string, string> = {
   done: "border-emerald-300/35 bg-emerald-400/10 text-emerald-200",
   fail: "border-rose-300/35 bg-rose-400/10 text-rose-200",
   failed: "border-rose-300/35 bg-rose-400/10 text-rose-200",
+  on_track: "border-emerald-300/35 bg-emerald-400/10 text-emerald-200",
+  at_risk: "border-amber-300/40 bg-amber-400/10 text-amber-100",
   blocked: "border-amber-300/40 bg-amber-400/10 text-amber-100",
   pending: "border-white/10 bg-white/6 text-slate-200",
   queued: "border-cyan-300/30 bg-cyan-400/10 text-cyan-100",
@@ -14,6 +16,8 @@ const STATUS_STYLES: Record<string, string> = {
   partial: "border-fuchsia-300/35 bg-fuchsia-400/10 text-fuchsia-100",
   waived: "border-violet-300/35 bg-violet-400/10 text-violet-100",
   awaiting_review: "border-teal-300/35 bg-teal-400/10 text-teal-100",
+  local_chatgpt: "border-cyan-300/30 bg-cyan-400/10 text-cyan-100",
+  hosted_api: "border-indigo-300/35 bg-indigo-400/10 text-indigo-100",
 };
 
 export function StatusPill({

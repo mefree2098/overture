@@ -9,6 +9,9 @@
 .overture-e2e
 coverage
 node_modules
+vendor/symphony/elixir/_build
+vendor/symphony/elixir/deps
+vendor/symphony/elixir/bin/symphony
 playwright-report
 test-results
 npm-debug.log*

@@ -15,9 +15,16 @@ export function slugify(value: string) {
 }
 
 export function titleFromKey(value: string) {
-  return value
+  const normalized = value
     .replace(/[_-]+/g, " ")
     .replace(/\b\w/g, (match) => match.toUpperCase());
+
+  return normalized
+    .replace(/\bChatgpt\b/g, "ChatGPT")
+    .replace(/\bApi\b/g, "API")
+    .replace(/\bAws\b/g, "AWS")
+    .replace(/\bQa\b/g, "QA")
+    .replace(/\bUx\b/g, "UX");
 }
 
 export function formatDateTime(value: string) {
@@ -26,6 +33,14 @@ export function formatDateTime(value: string) {
 
 export function formatRelativeTime(value: string) {
   return formatDistanceToNowStrict(new Date(value), { addSuffix: true });
+}
+
+export function stripAnsi(value: string) {
+  return value
+    .replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, "")
+    .replace(/\u001b[@-_]/g, "")
+    .replace(/\r/g, "")
+    .trim();
 }
 
 export function tryParseJson<T>(value: string | null): T {

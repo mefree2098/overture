@@ -27,7 +27,8 @@ case "$MODE" in
     ;;
   jetson)
     echo "Jetson deployment notes are in infra/jetson/README.md"
-    echo "Use an arm64 image build and provide OPENAI_API_KEY for hosted Codex auth on the device."
+    echo "Use an arm64 image build and mount an existing ChatGPT Codex auth directory into the container."
+    echo "Hosted API mode remains an optional fallback, not the default deployment path."
     ;;
   azure)
     echo "Azure deployment assets are in infra/azure/main.bicep"
@@ -35,11 +36,11 @@ case "$MODE" in
     echo "1. az group create --name overture-rg --location eastus"
     echo "2. az deployment group create --resource-group overture-rg --template-file infra/azure/main.bicep"
     echo "3. Deploy the built container image to the created Container App"
-    echo "4. Provide OPENAI_API_KEY as the container secret so Codex bootstraps on start"
+    echo "4. Extend the baseline with a real Codex auth strategy before enabling live planning/execution"
     ;;
   aws)
     echo "AWS baseline assets are in infra/aws/template.yaml"
-    echo "The current AWS template is a planning stub and must be replaced with a container-hosted runtime that injects OPENAI_API_KEY before live Symphony execution."
+    echo "The current AWS template is a planning stub and must be replaced with a real container-hosted runtime before live Symphony execution."
     ;;
   *)
     echo "Usage: ./deploy.sh [local|jetson|azure|aws]" >&2

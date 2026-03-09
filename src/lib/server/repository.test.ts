@@ -113,4 +113,24 @@ describe("repository lifecycle", () => {
     expect(existsSync(projectWorkspaceRoot)).toBe(false);
     expect(symphonyManager.stopSymphonyForProject).toHaveBeenCalledWith(created.slug);
   });
+
+  it("updates a project's stored name without changing its slug", async () => {
+    const repository = await import("@/lib/server/repository");
+
+    const created = await repository.createProjectFromSpec({
+      name: "Original Name",
+      repoSource: ".",
+      executionMode: "local_chatgpt",
+      specFilename: "plan.md",
+      specText: "# Blueprint\n\n## Goal\nPersist a renamed project name",
+    });
+
+    const updated = repository.updateProjectName(created.projectId, "Renamed Project");
+    const snapshot = repository.getProjectSnapshot(created.projectId);
+
+    expect(updated?.name).toBe("Renamed Project");
+    expect(updated?.slug).toBe(created.slug);
+    expect(snapshot?.project.name).toBe("Renamed Project");
+    expect(snapshot?.project.slug).toBe(created.slug);
+  });
 });

@@ -8,10 +8,12 @@ import {
   AlertTriangle,
   Boxes,
   CheckCircle2,
-  Cpu,
+  CircleDashed,
   ExternalLink,
   FileClock,
   PlayCircle,
+  Rocket,
+  Settings2,
   ShieldCheck,
   Trash2,
 } from "lucide-react";
@@ -22,7 +24,7 @@ import type {
   GateVerdict,
   ProjectSnapshot,
 } from "@/lib/types";
-import { formatDateTime, formatRelativeTime } from "@/lib/utils";
+import { formatDateTime, formatRelativeTime, stripAnsi } from "@/lib/utils";
 
 type ProjectTab = "overview" | "plan" | "runtime" | "evidence";
 
@@ -46,6 +48,15 @@ function asString(value: unknown) {
   return typeof value === "string" ? value : "";
 }
 
+function totalTokens(value: unknown) {
+  const tokens = asRecord(value);
+  return asNumber(tokens?.total_tokens);
+}
+
+function isWaitingForSlot(item: Record<string, unknown>) {
+  return asString(item.error) === "no available orchestrator slots";
+}
+
 function MetricCard({
   label,
   value,
@@ -61,6 +72,45 @@ function MetricCard({
         {label}
       </p>
       <p className="mt-3 text-3xl font-semibold text-[var(--color-ink)]">{value}</p>
+      <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">{detail}</p>
+    </div>
+  );
+}
+
+function JourneyStep({
+  label,
+  detail,
+  state,
+}: {
+  label: string;
+  detail: string;
+  state: "done" | "active" | "upcoming" | "warning";
+}) {
+  const toneClass =
+    state === "done"
+      ? "border-emerald-300/30 bg-emerald-400/10"
+      : state === "active"
+        ? "border-sky-300/30 bg-sky-400/10"
+        : state === "warning"
+          ? "border-amber-300/30 bg-amber-400/10"
+          : "border-white/8 bg-white/4";
+  const icon =
+    state === "done" ? (
+      <CheckCircle2 className="h-4 w-4 text-[var(--color-success)]" />
+    ) : state === "active" ? (
+      <Rocket className="h-4 w-4 text-[var(--color-accent)]" />
+    ) : state === "warning" ? (
+      <AlertTriangle className="h-4 w-4 text-[var(--color-warning)]" />
+    ) : (
+      <CircleDashed className="h-4 w-4 text-[var(--color-muted)]" />
+    );
+
+  return (
+    <div className={`rounded-[24px] border p-4 ${toneClass}`}>
+      <div className="flex items-center gap-2">
+        {icon}
+        <p className="text-sm font-semibold text-[var(--color-ink)]">{label}</p>
+      </div>
       <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">{detail}</p>
     </div>
   );
@@ -224,21 +274,44 @@ function nextStepForProject({
   symphonyRunning,
   openFindings,
   blockedIssues,
+  waitingForSlots,
+  retryProblems,
+  maxAgents,
   releaseStatus,
   activeIssues,
 }: {
   symphonyRunning: boolean;
   openFindings: number;
   blockedIssues: number;
+  waitingForSlots: number;
+  retryProblems: number;
+  maxAgents: number;
   releaseStatus: GateVerdict;
   activeIssues: number;
 }) {
   if (!symphonyRunning) {
     return {
-      title: "Step 1: start the project run",
+      title: "Start the automated run when you are ready",
       detail:
-        "Launch Symphony to begin working through the plan. You can review the draft plan first if you want.",
+        "Nothing happens automatically until you press the start button. You can review the plan first if you want.",
       tone: "normal" as const,
+    };
+  }
+
+  if (waitingForSlots > 0 && retryProblems === 0) {
+    return {
+      title: "More work is queued behind the current workers",
+      detail: `${waitingForSlots} ticket${waitingForSlots === 1 ? " is" : "s are"} waiting for a free Symphony worker. This is normal because this project is limited to ${maxAgents} parallel agent${maxAgents === 1 ? "" : "s"}.`,
+      tone: "normal" as const,
+    };
+  }
+
+  if (retryProblems > 0) {
+    return {
+      title: "Some tickets need attention",
+      detail:
+        "Open the Live run tab to see which tickets are retrying and the exact error Symphony reported.",
+      tone: "warning" as const,
     };
   }
 
@@ -246,7 +319,7 @@ function nextStepForProject({
     return {
       title: "A few tickets are blocked",
       detail:
-        "Open the Runtime tab to see which tickets are blocked and what Symphony has already reported.",
+        "Some later tickets are waiting on earlier dependencies. This is normal in a large plan unless the queue stops moving.",
       tone: "warning" as const,
     };
   }
@@ -271,16 +344,16 @@ function nextStepForProject({
 
   if (activeIssues > 0) {
     return {
-      title: "The project is currently running",
+      title: "The automated run is underway",
       detail:
-        "Overture is tracking active work items. Check the Runtime tab for live execution details or the Overview tab for gate progress.",
+        "Overture is tracking active work items. Check the Live run tab for progress or the Overview tab for release checks.",
       tone: "normal" as const,
     };
   }
 
   return {
-    title: "Plan review is ready",
-    detail: "Review the plan tab, then launch the run whenever you are ready.",
+    title: "The plan is ready for review",
+    detail: "Review the Tasks & plan tab, then start the automated run whenever you are ready.",
     tone: "normal" as const,
   };
 }
@@ -290,6 +363,10 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [activeTab, setActiveTab] = useState<ProjectTab>("overview");
   const [running, setRunning] = useState(false);
+  const [runError, setRunError] = useState<string | null>(null);
+  const [nameDraft, setNameDraft] = useState(initialSnapshot.project.name);
+  const [renameSaving, setRenameSaving] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
@@ -308,10 +385,21 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
   const symphonySessions = asArray(symphonyState?.running);
   const symphonyRetryQueue = asArray(symphonyState?.retrying);
   const codexTotals = asRecord(symphonyState?.codex_totals);
+  const waitingForSlotQueue = symphonyRetryQueue.filter(isWaitingForSlot);
+  const retryProblemQueue = symphonyRetryQueue.filter((item) => !isWaitingForSlot(item));
+  const sanitizedBootstrapLog = snapshot.symphony?.bootstrapTail
+    ? snapshot.symphony.bootstrapTail.map(stripAnsi).filter(Boolean)
+    : [];
+  const symphonyDashboardUrl = snapshot.symphony?.stateUrl
+    ? snapshot.symphony.stateUrl.replace(/\/api\/v1\/state$/, "/")
+    : null;
   const nextStep = nextStepForProject({
     symphonyRunning: Boolean(snapshot.symphony?.running),
     openFindings: openFindings.length,
     blockedIssues: blockedIssues.length,
+    waitingForSlots: waitingForSlotQueue.length,
+    retryProblems: retryProblemQueue.length,
+    maxAgents: snapshot.project.symphonyMaxConcurrentAgents,
     releaseStatus: snapshot.gateStatus.releaseStatus,
     activeIssues: activeIssues.length,
   });
@@ -334,14 +422,27 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
     };
   }, [snapshot.project.id]);
 
+  useEffect(() => {
+    setNameDraft(snapshot.project.name);
+  }, [snapshot.project.name]);
+
   function runExecution() {
     setRunning(true);
+    setRunError(null);
+    setActiveTab("runtime");
 
     startTransition(async () => {
       try {
-        await fetch(`/api/projects/${snapshot.project.id}/execute`, {
+        const response = await fetch(`/api/projects/${snapshot.project.id}/execute`, {
           method: "POST",
         });
+        const payload = (await response.json().catch(() => ({}))) as {
+          error?: string;
+        };
+
+        if (!response.ok) {
+          throw new Error(payload.error ?? "Failed to start the automated run.");
+        }
 
         const refresh = await fetch(`/api/projects/${snapshot.project.id}/snapshot`, {
           cache: "no-store",
@@ -350,8 +451,59 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
         if (refresh.ok) {
           setSnapshot((await refresh.json()) as ProjectSnapshot);
         }
+      } catch (error) {
+        setRunError(
+          error instanceof Error ? error.message : "Failed to start the automated run.",
+        );
       } finally {
         setRunning(false);
+      }
+    });
+  }
+
+  function renameProject() {
+    const trimmedName = nameDraft.trim();
+
+    if (!trimmedName || trimmedName === snapshot.project.name) {
+      setRenameError(trimmedName ? null : "Project name is required.");
+      return;
+    }
+
+    setRenameSaving(true);
+    setRenameError(null);
+
+    startTransition(async () => {
+      try {
+        const response = await fetch(`/api/projects/${snapshot.project.id}`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            name: trimmedName,
+          }),
+        });
+        const payload = (await response.json()) as { error?: string };
+
+        if (!response.ok) {
+          throw new Error(payload.error ?? "Failed to rename project.");
+        }
+
+        const refresh = await fetch(`/api/projects/${snapshot.project.id}/snapshot`, {
+          cache: "no-store",
+        });
+
+        if (refresh.ok) {
+          setSnapshot((await refresh.json()) as ProjectSnapshot);
+        }
+
+        router.refresh();
+      } catch (error) {
+        setRenameError(
+          error instanceof Error ? error.message : "Failed to rename project.",
+        );
+      } finally {
+        setRenameSaving(false);
       }
     });
   }
@@ -427,17 +579,52 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
       perf: "pending" as GateVerdict,
     },
   ];
+  const planStepState = "done" as const;
+  const runStepState =
+    snapshot.gateStatus.releaseStatus === "pass"
+      ? ("done" as const)
+      : retryProblemQueue.length
+        ? ("warning" as const)
+        : snapshot.symphony?.running
+          ? ("active" as const)
+          : ("upcoming" as const);
+  const checksStepState =
+    snapshot.gateStatus.releaseStatus === "pass"
+      ? ("done" as const)
+      : openFindings.length || snapshot.gateStatus.qaStatus === "fail" || snapshot.gateStatus.securityStatus === "fail"
+        ? ("warning" as const)
+        : snapshot.symphony?.running || completedTasks > 0
+          ? ("active" as const)
+          : ("upcoming" as const);
+  const runStatusLabel = snapshot.symphony?.running
+    ? retryProblemQueue.length
+      ? "Needs attention"
+      : "Running now"
+    : "Not started";
+  const runStatusDetail = snapshot.symphony?.running
+    ? retryProblemQueue.length
+      ? "Some tickets are retrying after an error."
+      : "Overture is polling the live Symphony run."
+    : "Review the plan and start the run when you are ready.";
 
   return (
     <div className="space-y-6">
       <section className="panel halo-ring rounded-[36px] p-6 lg:p-8">
         <div className="grid gap-8 xl:grid-cols-[1.04fr_0.96fr]">
           <div className="space-y-6">
-            <div className="flex flex-wrap items-center gap-2">
-              <StatusPill status={snapshot.project.health} />
-              <StatusPill status={snapshot.gateStatus.releaseStatus} />
-              <StatusPill status={snapshot.project.executionMode} />
-              <StatusPill status={snapshot.symphony?.running ? "in_progress" : "pending"} />
+            <div className="flex flex-wrap gap-3">
+              <div className="rounded-full border border-white/8 bg-white/4 px-4 py-2 text-sm text-[var(--color-muted)]">
+                <span className="font-semibold text-[var(--color-ink)]">Project health:</span>{" "}
+                {snapshot.project.health === "on_track"
+                  ? "On track"
+                  : snapshot.project.health === "at_risk"
+                    ? "Needs review"
+                    : "Blocked"}
+              </div>
+              <div className="rounded-full border border-white/8 bg-white/4 px-4 py-2 text-sm text-[var(--color-muted)]">
+                <span className="font-semibold text-[var(--color-ink)]">Automated run:</span>{" "}
+                {runStatusLabel}
+              </div>
             </div>
 
             <div className="space-y-3">
@@ -452,26 +639,48 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
               </p>
             </div>
 
+            <div className="grid gap-4 md:grid-cols-3">
+              <JourneyStep
+                label="1. Plan created"
+                detail="The written plan has already been organized into milestones and tasks."
+                state={planStepState}
+              />
+              <JourneyStep
+                label="2. Automated run"
+                detail={runStatusDetail}
+                state={runStepState}
+              />
+              <JourneyStep
+                label="3. Final checks"
+                detail={
+                  snapshot.gateStatus.releaseStatus === "pass"
+                    ? "All required checks have passed."
+                    : "QA, security, and deployment checks stay here until the project is ready."
+                }
+                state={checksStepState}
+              />
+            </div>
+
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               <MetricCard
-                label="Completed"
+                label="Plan items finished"
                 value={`${completedTasks}/${snapshot.workItems.length}`}
-                detail="Tasks closed or waived across the plan."
+                detail="Tasks already closed or waived across the project."
               />
               <MetricCard
-                label="Active tickets"
+                label="Working now"
                 value={String(activeIssues.length)}
-                detail="Tickets currently queued or in progress."
+                detail="Tickets currently queued or actively being worked."
               />
               <MetricCard
-                label="Open findings"
+                label="Needs attention"
                 value={String(openFindings.length)}
-                detail="Issues that still need follow-up before release."
+                detail="Open findings that still need follow-up before release."
               />
               <MetricCard
                 label="Last update"
                 value={formatRelativeTime(snapshot.project.lastActivityAt)}
-                detail="Latest activity recorded by Overture."
+                detail="Most recent activity recorded for this project."
               />
             </div>
           </div>
@@ -481,18 +690,18 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--color-accent)]">
-                    Next step
+                    Main action
                   </p>
                   <h2 className="mt-3 text-2xl font-semibold text-[var(--color-ink)]">
-                    {snapshot.symphony?.running ? "Runtime live" : "Ready to launch"}
+                    {snapshot.symphony?.running ? "Automated run is live" : "Ready to start"}
                   </h2>
                   <p className="mt-2 text-sm leading-7 text-[var(--color-muted)]">
                     {snapshot.symphony?.running
-                      ? "Symphony is attached and Overture is polling it continuously."
-                      : "Launch Symphony when you are ready to move from planning into execution."}
+                      ? "Overture is checking the Symphony run every few seconds and updating this page automatically."
+                      : "Nothing will start until you press the button below. You can review the plan first if you want."}
                   </p>
                 </div>
-                <Cpu className="h-6 w-6 text-[var(--color-accent)]" />
+                <Rocket className="h-6 w-6 text-[var(--color-accent)]" />
               </div>
 
               <div className="mt-5 flex flex-wrap items-center gap-3">
@@ -508,21 +717,13 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
                     <PlayCircle className="h-4 w-4" />
                   )}
                   {running
-                    ? "Starting Symphony..."
+                    ? "Starting automated run..."
                     : snapshot.symphony?.running
-                      ? "Refresh Symphony"
-                      : "Launch Symphony"}
-                </button>
-                <button
-                  type="button"
-                  disabled={running || deleting}
-                  onClick={deleteCurrentProject}
-                  className="inline-flex items-center gap-2 rounded-full border border-[rgba(255,123,123,0.32)] bg-[rgba(255,92,92,0.08)] px-5 py-3 text-sm font-semibold text-[var(--color-danger)] transition hover:bg-[rgba(255,92,92,0.14)] disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <Trash2 className="h-4 w-4" />
-                  {deleting ? "Deleting project..." : "Delete project"}
+                      ? "Refresh live run"
+                      : "Start automated run"}
                 </button>
               </div>
+              {runError ? <p className="mt-3 text-sm text-[var(--color-danger)]">{runError}</p> : null}
               {deleteError ? (
                 <p className="mt-3 text-sm text-[var(--color-danger)]">{deleteError}</p>
               ) : null}
@@ -534,11 +735,37 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
               tone={nextStep.tone}
             />
 
-            <div className="panel rounded-[30px] p-6">
-              <h2 className="text-xl font-semibold text-[var(--color-ink)]">
-                Project settings used for this run
-              </h2>
+            <details className="panel rounded-[30px] p-6">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-lg font-semibold text-[var(--color-ink)]">
+                Project settings and options
+                <Settings2 className="h-5 w-5 text-[var(--color-muted)]" />
+              </summary>
               <div className="mt-4 grid gap-3 text-sm text-[var(--color-muted)] sm:grid-cols-2">
+                <div className="rounded-[22px] border border-white/8 bg-white/4 p-4 sm:col-span-2">
+                  <p className="font-semibold text-[var(--color-ink)]">Project name</p>
+                  <p className="mt-2">
+                    Give this project the name you want to see on the dashboard and project page.
+                  </p>
+                  <div className="mt-3 flex flex-col gap-3 sm:flex-row">
+                    <input
+                      aria-label="Rename project"
+                      value={nameDraft}
+                      onChange={(event) => setNameDraft(event.target.value)}
+                      className="glass-input flex-1 rounded-[18px] px-4 py-3"
+                    />
+                    <button
+                      type="button"
+                      disabled={renameSaving || !nameDraft.trim() || nameDraft.trim() === snapshot.project.name}
+                      onClick={renameProject}
+                      className="glass-button inline-flex items-center justify-center rounded-full px-5 py-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {renameSaving ? "Saving..." : "Save name"}
+                    </button>
+                  </div>
+                  {renameError ? (
+                    <p className="mt-3 text-sm text-[var(--color-danger)]">{renameError}</p>
+                  ) : null}
+                </div>
                 <div className="rounded-[22px] border border-white/8 bg-white/4 p-4">
                   <p className="font-semibold text-[var(--color-ink)]">Planning model</p>
                   <p className="mt-2">{snapshot.project.plannerModel ?? "Codex default"}</p>
@@ -552,13 +779,39 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
                   <p className="mt-2">{snapshot.project.plannerReasoningEffort}</p>
                 </div>
                 <div className="rounded-[22px] border border-white/8 bg-white/4 p-4">
-                  <p className="font-semibold text-[var(--color-ink)]">Parallel agents / turns</p>
+                  <p className="font-semibold text-[var(--color-ink)]">Parallel workers / turns</p>
                   <p className="mt-2">
                     {snapshot.project.symphonyMaxConcurrentAgents} / {snapshot.project.symphonyMaxTurns}
                   </p>
                 </div>
+                <div className="rounded-[22px] border border-white/8 bg-white/4 p-4 sm:col-span-2">
+                  <p className="font-semibold text-[var(--color-ink)]">Run mode</p>
+                  <p className="mt-2">
+                    {snapshot.project.executionMode === "local_chatgpt"
+                      ? "Local ChatGPT Codex"
+                      : "Hosted API Codex"}
+                  </p>
+                </div>
               </div>
-            </div>
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <Link
+                  href="/settings"
+                  className="inline-flex items-center gap-2 rounded-full border border-[var(--color-border)] bg-white/6 px-4 py-2 text-sm font-semibold text-[var(--color-muted)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-ink)]"
+                >
+                  <Settings2 className="h-4 w-4" />
+                  Open settings
+                </Link>
+                <button
+                  type="button"
+                  disabled={running || deleting}
+                  onClick={deleteCurrentProject}
+                  className="inline-flex items-center gap-2 rounded-full border border-[rgba(255,123,123,0.32)] bg-[rgba(255,92,92,0.08)] px-4 py-2 text-sm font-semibold text-[var(--color-danger)] transition hover:bg-[rgba(255,92,92,0.14)] disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  {deleting ? "Deleting..." : "Delete project"}
+                </button>
+              </div>
+            </details>
           </aside>
         </div>
       </section>
@@ -573,17 +826,17 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
           <TabButton
             active={activeTab === "plan"}
             onClick={() => setActiveTab("plan")}
-            label="Plan"
+            label="Tasks & plan"
           />
           <TabButton
             active={activeTab === "runtime"}
             onClick={() => setActiveTab("runtime")}
-            label="Runtime"
+            label="Live run"
           />
           <TabButton
             active={activeTab === "evidence"}
             onClick={() => setActiveTab("evidence")}
-            label="Evidence"
+            label="Results"
           />
         </div>
       </section>
@@ -592,41 +845,41 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
         <section className="space-y-6">
           <div className="grid gap-4 lg:grid-cols-2">
             <GateCard
-              label="QA gate"
+              label="QA checks"
               status={snapshot.gateStatus.qaStatus}
-              description="Unit, integration, end-to-end, build, and validation evidence."
+              description="Build, validation, test, and quality proof for the project."
             />
             <GateCard
-              label="Security gate"
+              label="Security checks"
               status={snapshot.gateStatus.securityStatus}
-              description="Security scans, dependency checks, secrets review, and baseline runtime coverage."
+              description="Security scans, dependency review, and runtime safety checks."
             />
             <GateCard
-              label="Deployment gate"
+              label="Deployment checks"
               status={snapshot.gateStatus.deployStatus}
-              description="Local deployment proof plus platform deployment planning evidence."
+              description="Deployment proof for local launch and supported platform plans."
             />
             <GateCard
-              label="Release gate"
+              label="Ready to release"
               status={snapshot.gateStatus.releaseStatus}
-              description="Final closure gate that opens only when the other required checks pass."
+              description="Final status after the required quality, security, and deployment checks."
             />
           </div>
 
           <div className="grid gap-4 xl:grid-cols-3">
             <IssueList
-              label="Queued or active"
-              description="Tickets ready to work or already in motion."
+              label="Ready now"
+              description="Tickets that are ready to work or already in motion."
               issues={activeIssues}
             />
             <IssueList
-              label="Needs review"
-              description="Tickets that Symphony has moved to review."
+              label="Ready for review"
+              description="Tickets that Symphony believes are ready for a review pass."
               issues={reviewIssues}
             />
             <IssueList
-              label="Blocked"
-              description="Tickets waiting on a blocker or unresolved dependency."
+              label="Waiting on earlier work"
+              description="These tickets cannot start yet because earlier work still needs to finish."
               issues={blockedIssues}
             />
           </div>
@@ -640,8 +893,7 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
                     Findings summary
                   </h2>
                   <p className="mt-2 text-sm leading-7 text-[var(--color-muted)]">
-                    Overture keeps the open items here so you can quickly see whether release is
-                    blocked.
+                    If anything is still blocking the project, it will show up here.
                   </p>
                 </div>
               </div>
@@ -685,7 +937,7 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
                     Project basics
                   </h2>
                   <p className="mt-2 text-sm leading-7 text-[var(--color-muted)]">
-                    The core execution settings and paths captured when this project was created.
+                    The key details Overture saved when this project was created.
                   </p>
                 </div>
               </div>
@@ -724,10 +976,10 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
       {activeTab === "plan" ? (
         <section className="space-y-4">
           <div className="panel rounded-[30px] p-6">
-            <h2 className="text-2xl font-semibold text-[var(--color-ink)]">Plan review</h2>
+            <h2 className="text-2xl font-semibold text-[var(--color-ink)]">Tasks and plan</h2>
             <p className="mt-2 text-sm leading-7 text-[var(--color-muted)]">
-              Review the milestone tree, acceptance criteria, dependencies, risks, and injected
-              gates before or during execution.
+              Review the milestone tree, task dependencies, acceptance criteria, and release checks
+              before or during the run.
             </p>
           </div>
           <PlanWorkbench
@@ -740,53 +992,204 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
 
       {activeTab === "runtime" ? (
         <section className="space-y-6">
+          <div className="panel rounded-[30px] p-6">
+            <h2 className="text-2xl font-semibold text-[var(--color-ink)]">
+              What you are seeing
+            </h2>
+            <p className="mt-3 text-sm leading-7 text-[var(--color-muted)]">
+              {waitingForSlotQueue.length
+                ? `${symphonySessions.length} ticket${symphonySessions.length === 1 ? " is" : "s are"} running now, and ${waitingForSlotQueue.length} more ${waitingForSlotQueue.length === 1 ? "is" : "are"} waiting for a free worker. That waiting state is normal because this project is limited to ${snapshot.project.symphonyMaxConcurrentAgents} parallel agent${snapshot.project.symphonyMaxConcurrentAgents === 1 ? "" : "s"}.`
+                : retryProblemQueue.length
+                  ? `${retryProblemQueue.length} ticket${retryProblemQueue.length === 1 ? " is" : "s are"} retrying after an execution problem. Check the queue details below for the exact error.`
+                  : snapshot.symphony?.running
+                    ? "Symphony is actively working through the queued tickets."
+                    : "The automated run has not started yet. Press Start automated run when you are ready."}
+            </p>
+          </div>
+
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <MetricCard
-              label="Running sessions"
+              label="Running now"
               value={String(asNumber(symphonyCounts?.running))}
-              detail="Symphony sessions currently executing."
+              detail="Tickets Symphony is actively working on."
             />
             <MetricCard
-              label="Retry queue"
-              value={String(asNumber(symphonyCounts?.retrying))}
-              detail="Tickets waiting for retry."
+              label="Waiting to start"
+              value={String(waitingForSlotQueue.length)}
+              detail="Tickets queued behind the current worker limit."
             />
             <MetricCard
-              label="PID / Port"
-              value={
-                snapshot.symphony
-                  ? `${snapshot.symphony.pid} / ${snapshot.symphony.port}`
-                  : "Not started"
-              }
-              detail="Local Symphony runtime details."
+              label="Needs another attempt"
+              value={String(retryProblemQueue.length)}
+              detail="Tickets retrying after an execution error."
             />
             <MetricCard
-              label="Codex turns"
-              value={String(asNumber(codexTotals?.turns))}
-              detail="Turn count reported by Symphony so far."
+              label="Parallel workers"
+              value={String(snapshot.project.symphonyMaxConcurrentAgents)}
+              detail="Maximum tickets Symphony can work on at once."
             />
           </div>
 
-          <div className="grid gap-4 xl:grid-cols-[0.92fr_1.08fr]">
+          <div className="grid gap-4 xl:grid-cols-2">
             <div className="panel rounded-[30px] p-6">
-              <h2 className="text-2xl font-semibold text-[var(--color-ink)]">
-                Runtime surfaces
-              </h2>
-              <div className="mt-5 space-y-3 text-sm text-[var(--color-muted)]">
+              <div className="flex items-center justify-between gap-4">
+                <h2 className="text-2xl font-semibold text-[var(--color-ink)]">
+                  Working right now
+                </h2>
+                <div className="rounded-full border border-white/8 bg-white/4 px-3 py-1 text-sm text-[var(--color-muted)]">
+                  Tokens used: {totalTokens(codexTotals).toLocaleString()}
+                </div>
+              </div>
+              <div className="mt-5 space-y-3">
+                {symphonySessions.length ? (
+                  symphonySessions.map((session, index) => (
+                    <div
+                      key={`${asString(session.issue_id)}-${index}`}
+                      className="rounded-[22px] border border-white/8 bg-white/4 p-4 text-sm text-[var(--color-muted)]"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="font-semibold text-[var(--color-ink)]">
+                          {asString(session.issue_identifier) || asString(session.issue_id) || "Session"}
+                        </p>
+                        <StatusPill status={asString(session.state) || "in_progress"} />
+                      </div>
+                      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                        <p>Started: {asString(session.started_at) ? formatRelativeTime(asString(session.started_at)) : "n/a"}</p>
+                        <p>Turns: {asNumber(session.turn_count)}</p>
+                        <p>Tokens: {totalTokens(session.tokens).toLocaleString()}</p>
+                        <p>Last update: {asString(session.last_event_at) ? formatRelativeTime(asString(session.last_event_at)) : "n/a"}</p>
+                      </div>
+                      <p className="mt-3 text-sm leading-6 text-[var(--color-muted)]">
+                        {asString(session.last_message) || asString(session.last_event) || "Working..."}
+                      </p>
+                    </div>
+                  ))
+                ) : (
+                  <div className="rounded-[22px] border border-white/8 bg-white/4 p-4 text-sm text-[var(--color-muted)]">
+                    No live sessions are reported right now.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="panel rounded-[30px] p-6">
+              <h2 className="text-2xl font-semibold text-[var(--color-ink)]">Queue and attention</h2>
+              <div className="mt-5 space-y-3">
+                {waitingForSlotQueue.length ? (
+                  <div className="space-y-3">
+                    <div className="rounded-[22px] border border-sky-300/20 bg-sky-400/8 p-4">
+                      <p className="text-sm font-semibold text-[var(--color-ink)]">
+                        Waiting for a free worker
+                      </p>
+                      <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">
+                        These tickets are queued normally. They will begin when one of the current
+                        workers finishes.
+                      </p>
+                    </div>
+                    {waitingForSlotQueue.map((item, index) => (
+                      <div
+                        key={`${asString(item.issue_id)}-${index}`}
+                        className="rounded-[22px] border border-white/8 bg-white/4 p-4 text-sm text-[var(--color-muted)]"
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="font-semibold text-[var(--color-ink)]">
+                            {asString(item.issue_identifier) || asString(item.issue_id) || "Queue item"}
+                          </p>
+                          <StatusPill status="pending" />
+                        </div>
+                        <p className="mt-2">Next retry: {asString(item.due_at) ? formatRelativeTime(asString(item.due_at)) : "n/a"}</p>
+                        <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">
+                          Waiting for a free Symphony worker.
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-[22px] border border-white/8 bg-white/4 p-4 text-sm text-[var(--color-muted)]">
+                    Nothing is currently waiting for a worker.
+                  </div>
+                )}
+
+                {retryProblemQueue.length ? (
+                  <div className="space-y-3">
+                    <div className="rounded-[22px] border border-amber-300/20 bg-amber-400/8 p-4">
+                      <p className="text-sm font-semibold text-[var(--color-ink)]">
+                        Tickets retrying after an error
+                      </p>
+                      <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">
+                        These need attention because Symphony reported a real execution problem.
+                      </p>
+                    </div>
+                    {retryProblemQueue.map((item, index) => (
+                      <div
+                        key={`${asString(item.issue_id)}-${index}`}
+                        className="rounded-[22px] border border-white/8 bg-white/4 p-4 text-sm text-[var(--color-muted)]"
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="font-semibold text-[var(--color-ink)]">
+                            {asString(item.issue_identifier) || asString(item.issue_id) || "Queue item"}
+                          </p>
+                          <StatusPill status="failed" />
+                        </div>
+                        <p className="mt-2">Attempt: {asNumber(item.attempt)}</p>
+                        <p>
+                          Next retry: {asString(item.due_at) ? formatRelativeTime(asString(item.due_at)) : "n/a"}
+                        </p>
+                        <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">
+                          {asString(item.error) || "No error message provided."}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-[22px] border border-white/8 bg-white/4 p-4 text-sm text-[var(--color-muted)]">
+                    No tickets are currently retrying after an error.
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <details className="panel rounded-[30px] p-6">
+            <summary className="cursor-pointer text-lg font-semibold text-[var(--color-ink)]">
+              Advanced technical details
+            </summary>
+            <div className="mt-5 grid gap-4 xl:grid-cols-[0.92fr_1.08fr]">
+              <div className="space-y-3 text-sm text-[var(--color-muted)]">
+                <div className="rounded-[22px] border border-white/8 bg-white/4 p-4">
+                  <p className="font-semibold text-[var(--color-ink)]">PID / Port</p>
+                  <p className="mt-2">
+                    {snapshot.symphony
+                      ? `${snapshot.symphony.pid} / ${snapshot.symphony.port}`
+                      : "Not started"}
+                  </p>
+                </div>
                 <div className="rounded-[22px] border border-white/8 bg-white/4 p-4">
                   <p className="font-semibold text-[var(--color-ink)]">State URL</p>
                   <p className="mt-2 break-all">
                     {snapshot.symphony?.stateUrl ?? "Not available until Symphony starts."}
                   </p>
                   {snapshot.symphony?.stateUrl ? (
-                    <Link
-                      href={snapshot.symphony.stateUrl}
-                      target="_blank"
-                      className="mt-3 inline-flex items-center gap-2 text-sm text-[var(--color-accent)]"
-                    >
-                      Open state endpoint
-                      <ExternalLink className="h-4 w-4" />
-                    </Link>
+                    <div className="mt-3 flex flex-wrap gap-3">
+                      <Link
+                        href={snapshot.symphony.stateUrl}
+                        target="_blank"
+                        className="inline-flex items-center gap-2 text-sm text-[var(--color-accent)]"
+                      >
+                        Open state endpoint
+                        <ExternalLink className="h-4 w-4" />
+                      </Link>
+                      {symphonyDashboardUrl ? (
+                        <Link
+                          href={symphonyDashboardUrl}
+                          target="_blank"
+                          className="inline-flex items-center gap-2 text-sm text-[var(--color-accent)]"
+                        >
+                          Open Symphony dashboard
+                          <ExternalLink className="h-4 w-4" />
+                        </Link>
+                      ) : null}
+                    </div>
                   ) : null}
                 </div>
                 <div className="rounded-[22px] border border-white/8 bg-white/4 p-4">
@@ -802,73 +1205,17 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
                   </p>
                 </div>
               </div>
-            </div>
 
-            <div className="panel rounded-[30px] p-6">
-              <h2 className="text-2xl font-semibold text-[var(--color-ink)]">Bootstrap log</h2>
-              <div className="mt-5 rounded-[24px] border border-white/8 bg-[rgba(2,8,18,0.78)] p-4">
-                <pre className="fine-scrollbar max-h-[360px] overflow-auto whitespace-pre-wrap text-sm leading-7 text-[var(--color-muted)]">
-                  {snapshot.symphony?.bootstrapTail.length
-                    ? snapshot.symphony.bootstrapTail.join("\n")
-                    : "No runtime log yet. Launch Symphony to start capturing bootstrap output."}
+              <div className="rounded-[24px] border border-white/8 bg-[rgba(2,8,18,0.78)] p-4">
+                <p className="text-sm font-semibold text-[var(--color-ink)]">Raw terminal log</p>
+                <pre className="fine-scrollbar mt-4 max-h-[360px] overflow-auto whitespace-pre-wrap text-sm leading-7 text-[var(--color-muted)]">
+                  {sanitizedBootstrapLog.length
+                    ? sanitizedBootstrapLog.join("\n")
+                    : "No runtime log yet. Start the automated run to begin capturing bootstrap output."}
                 </pre>
               </div>
             </div>
-          </div>
-
-          <div className="grid gap-4 xl:grid-cols-2">
-            <div className="panel rounded-[30px] p-6">
-              <h2 className="text-2xl font-semibold text-[var(--color-ink)]">
-                Active Symphony sessions
-              </h2>
-              <div className="mt-5 space-y-3">
-                {symphonySessions.length ? (
-                  symphonySessions.map((session, index) => (
-                    <div
-                      key={`${asString(session.issue_id)}-${index}`}
-                      className="rounded-[22px] border border-white/8 bg-white/4 p-4 text-sm text-[var(--color-muted)]"
-                    >
-                      <p className="font-semibold text-[var(--color-ink)]">
-                        {asString(session.issue_identifier) || asString(session.issue_id) || "Session"}
-                      </p>
-                      <p className="mt-2">Run id: {asString(session.run_id) || "n/a"}</p>
-                      <p>Thread id: {asString(session.thread_id) || "n/a"}</p>
-                    </div>
-                  ))
-                ) : (
-                  <div className="rounded-[22px] border border-white/8 bg-white/4 p-4 text-sm text-[var(--color-muted)]">
-                    No live sessions are reported right now.
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="panel rounded-[30px] p-6">
-              <h2 className="text-2xl font-semibold text-[var(--color-ink)]">Retry queue</h2>
-              <div className="mt-5 space-y-3">
-                {symphonyRetryQueue.length ? (
-                  symphonyRetryQueue.map((item, index) => (
-                    <div
-                      key={`${asString(item.issue_id)}-${index}`}
-                      className="rounded-[22px] border border-white/8 bg-white/4 p-4 text-sm text-[var(--color-muted)]"
-                    >
-                      <p className="font-semibold text-[var(--color-ink)]">
-                        {asString(item.issue_identifier) || asString(item.issue_id) || "Retry item"}
-                      </p>
-                      <p className="mt-2">
-                        Attempts: {asNumber(item.attempts)} / {asNumber(item.max_attempts)}
-                      </p>
-                      <p>Next retry: {asString(item.next_retry_at) || "n/a"}</p>
-                    </div>
-                  ))
-                ) : (
-                  <div className="rounded-[22px] border border-white/8 bg-white/4 p-4 text-sm text-[var(--color-muted)]">
-                    Nothing is queued for retry.
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
+          </details>
         </section>
       ) : null}
 

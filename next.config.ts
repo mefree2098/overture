@@ -34,6 +34,9 @@ const nextConfig: NextConfig = {
   output: "standalone",
   poweredByHeader: false,
   serverExternalPackages: ["better-sqlite3"],
+  outputFileTracingExcludes: {
+    "/*": [".overture/codex-home/**/*"],
+  },
   async headers() {
     return [
       {

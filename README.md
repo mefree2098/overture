@@ -25,7 +25,7 @@ The current app is a working Next.js control plane with SQLite persistence, real
 There are two supported execution modes:
 
 - `local_chatgpt`: uses the local Codex runtime already authenticated on the machine running Overture
-- `hosted_api`: uses Codex with `OPENAI_API_KEY`
+- `hosted_api`: optional fallback mode that uses Codex with `OPENAI_API_KEY`
 
 The automated local container deployment includes the Codex CLI, `git`, the Elixir runtime required by Symphony, and startup auth bootstrapping. On container startup, Overture copies the host machine's ChatGPT-backed Codex auth into the container's persisted `CODEX_HOME` under the platform runtime root so live planning and execution work without an extra login step.
 
@@ -83,7 +83,7 @@ Common variables:
 - `CONTROL_PLANE_TRACKER_TOKEN`: token accepted by the tracker shim
 - `SYMPHONY_TRACKER_TOKEN`: token used by Symphony against the tracker shim
 - `NEXT_PUBLIC_DEFAULT_REPO`: default repo source shown in intake
-- `OPENAI_API_KEY`: required for `hosted_api` and cloud-style deployments
+- `OPENAI_API_KEY`: optional; only needed if you intentionally use `hosted_api`
 - `PORT`: app port
 - `OVERTURE_BIND_HOST`: bind host for `npm run start`
 - `OVERTURE_ROOT`: optional runtime data root override; defaults to `<repo>/.overture`
@@ -119,6 +119,29 @@ npm run start
 
 This remains the simplest path for real project creation and execution when you want to use local ChatGPT-backed Codex auth.
 
+## Local Docker quick start
+
+This is the recommended production-like path on this machine because it automatically reuses your existing ChatGPT Codex login:
+
+```bash
+bash deploy.sh local
+```
+
+Then open [http://127.0.0.1:3000](http://127.0.0.1:3000).
+
+What this does:
+
+- Builds the Docker image with the Codex CLI and Symphony dependencies included
+- Mounts your host Codex auth into the container
+- Persists runtime state under `.overture`
+- Starts the app on port `3000`
+
+Quick health check:
+
+```bash
+curl http://127.0.0.1:3000/api/health
+```
+
 ## Settings and model control
 
 Open `/settings` in the UI to control:
@@ -132,6 +155,8 @@ Open `/settings` in the UI to control:
 - Symphony parallelism and max-turn limits
 
 These settings apply to new projects only. Existing projects keep the planner/execution settings captured when they were created.
+
+Existing projects can also be renamed from the project page under `Project settings and options`.
 
 ## Create and execute a project
 
@@ -155,11 +180,11 @@ For a fresh project run:
 
 1. Delete the old project from the home dashboard or project page if you want a clean slate.
 2. Open the intake form on `/`.
-3. Enter a project name and confirm the repo or folder.
+3. Enter a project name.
 4. Paste or upload the next markdown blueprint.
 5. Optionally open `Advanced project options` if you want a different model or run mode for this one project.
-6. Click `Create project`.
-7. Open the new project page and click `Launch Symphony`.
+6. Click `Turn this plan into a project`.
+7. Open the new project page and click `Start automated run`.
 
 You can also create a project programmatically with `POST /api/projects` and then start execution with `POST /api/projects/:projectId/execute`.
 
@@ -210,20 +235,20 @@ For a fast manual smoke after launching the app:
 1. Open `/`.
 2. If needed, open `/settings` and confirm the default model and run mode.
 3. Create or open a project.
-4. Confirm the overview page shows the captured planning/execution settings.
-5. Launch Symphony from the project page.
+4. Confirm the overview page shows the captured planning and run settings.
+5. Start the automated run from the project page.
 6. Verify `/api/health` returns `ok: true`.
-7. Confirm the Runtime tab shows a live runtime or bootstrap log output.
+7. Confirm the `Live run` tab shows either active work or a clear waiting explanation.
 
 For a beginner end-to-end run in the UI:
 
 1. Open `/`.
 2. Enter a project name.
 3. Paste or upload a markdown plan.
-4. Click `Create project`.
-5. Review the `Overview` and `Plan` tabs.
-6. Click `Launch Symphony`.
-7. Use the `Runtime` tab for live progress and the `Evidence` tab for artifacts and audit history.
+4. Click `Turn this plan into a project`.
+5. Review the `Overview` and `Tasks & plan` tabs.
+6. Click `Start automated run`.
+7. Use the `Live run` tab for live progress and the `Results` tab for artifacts and audit history.
 
 ## Docker deployment
 
@@ -273,7 +298,7 @@ Default runtime directories:
 - `docker-compose.yml`: local container orchestration with a shared `.overture` bind mount
 - `deploy.sh`: helper for local, Jetson, Azure, and AWS deployment entrypoints
 - `infra/jetson/README.md`: Jetson deployment notes
-- `infra/azure/main.bicep`: Azure baseline container-hosting asset with `OPENAI_API_KEY` secret injection
+- `infra/azure/main.bicep`: Azure baseline container-hosting asset that still needs a real Codex auth strategy before live execution
 - `infra/aws/template.yaml`: AWS planning baseline; this is not yet a live Symphony hosting stack
 
 ## API surface
@@ -282,6 +307,7 @@ Default runtime directories:
 - `GET /api/projects`: list project summaries
 - `POST /api/projects`: create a project from spec content
 - `DELETE /api/projects/:projectId`: hard-delete a project
+- `PATCH /api/projects/:projectId`: rename a project
 - `GET /api/projects/:projectId/snapshot`: fetch the full project snapshot
 - `POST /api/projects/:projectId/execute`: launch or refresh Symphony for the project
 - `GET /api/settings`: read saved platform defaults

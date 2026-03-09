@@ -94,57 +94,38 @@ async function ensureSymphonyBuilt() {
     // Fall through and build.
   }
 
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn(mixBinaryPath(), ["setup"], {
-      cwd: symphonyRoot(),
-      env: toolEnv(),
-      stdio: ["ignore", "pipe", "pipe"],
+  async function runMixCommand(args: string[], failureLabel: string) {
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn(mixBinaryPath(), args, {
+        cwd: symphonyRoot(),
+        env: toolEnv(),
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let stderr = "";
+
+      child.stderr.on("data", (chunk) => {
+        stderr += chunk.toString();
+      });
+
+      child.on("error", (error) => {
+        reject(error);
+      });
+
+      child.on("close", (code) => {
+        if (code === 0) {
+          resolve();
+          return;
+        }
+
+        reject(new Error(stderr.trim() || `${failureLabel} failed`));
+      });
     });
-    let stderr = "";
+  }
 
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
-
-    child.on("error", (error) => {
-      reject(error);
-    });
-
-    child.on("close", (code) => {
-      if (code === 0) {
-        resolve();
-        return;
-      }
-
-      reject(new Error(stderr.trim() || "mix setup failed"));
-    });
-  });
-
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn(mixBinaryPath(), ["build"], {
-      cwd: symphonyRoot(),
-      env: toolEnv(),
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let stderr = "";
-
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
-
-    child.on("error", (error) => {
-      reject(error);
-    });
-
-    child.on("close", (code) => {
-      if (code === 0) {
-        resolve();
-        return;
-      }
-
-      reject(new Error(stderr.trim() || "mix build failed"));
-    });
-  });
+  await runMixCommand(["local.hex", "--force"], "mix local.hex");
+  await runMixCommand(["local.rebar", "--force"], "mix local.rebar");
+  await runMixCommand(["setup"], "mix setup");
+  await runMixCommand(["build"], "mix build");
 
   accessSync(symphonyBinaryPath(), fsConstants.X_OK);
 }
