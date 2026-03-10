@@ -49,6 +49,7 @@ export const RUN_PHASES = [
 ] as const;
 
 export const DEPLOYMENT_TARGETS = ["local", "jetson", "azure", "aws"] as const;
+export const CODEX_REASONING_EFFORTS = ["low", "medium", "high", "xhigh"] as const;
 
 export const TRACKER_STATE_NAMES = [
   "Todo",
@@ -68,6 +69,7 @@ export const DEFAULT_APP_SETTINGS = {
   plannerModel: null,
   executionModel: null,
   plannerReasoningEffort: "low",
+  executionReasoningEffort: "medium",
   defaultExecutionMode: "local_chatgpt",
   defaultRepoSource: ".",
   defaultQaStrictness: 4,

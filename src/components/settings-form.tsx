@@ -1,10 +1,16 @@
 "use client";
 
-import { startTransition, useState } from "react";
+import { startTransition, useEffect, useState } from "react";
+import {
+  CodexReasoningSelect,
+} from "@/components/codex-reasoning-select";
 import { CodexModelSelect } from "@/components/codex-model-select";
+import {
+  getCodexReasoningEffortOptions,
+} from "@/lib/codex-reasoning";
 import type { CodexModelOption } from "@/lib/model-catalog";
 import { CheckCircle2, LoaderCircle, Settings2, Sparkles } from "lucide-react";
-import type { AppSettingsRecord, ExecutionMode, PlannerReasoningEffort } from "@/lib/types";
+import type { AppSettingsRecord, CodexReasoningEffort, ExecutionMode } from "@/lib/types";
 
 function supportLabel(
   executionSupport: {
@@ -48,7 +54,9 @@ export function SettingsForm({
   const [plannerModel, setPlannerModel] = useState(initialSettings.plannerModel ?? "");
   const [executionModel, setExecutionModel] = useState(initialSettings.executionModel ?? "");
   const [plannerReasoningEffort, setPlannerReasoningEffort] =
-    useState<PlannerReasoningEffort>(initialSettings.plannerReasoningEffort);
+    useState<CodexReasoningEffort>(initialSettings.plannerReasoningEffort);
+  const [executionReasoningEffort, setExecutionReasoningEffort] =
+    useState<CodexReasoningEffort>(initialSettings.executionReasoningEffort);
   const [defaultExecutionMode, setDefaultExecutionMode] = useState<ExecutionMode>(
     initialSettings.defaultExecutionMode,
   );
@@ -70,6 +78,40 @@ export function SettingsForm({
   const [saving, setSaving] = useState(false);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const plannerReasoningOptions = getCodexReasoningEffortOptions(plannerModel);
+  const executionReasoningOptions = getCodexReasoningEffortOptions(executionModel);
+
+  useEffect(() => {
+    if (
+      plannerReasoningOptions.some((option) => option.value === plannerReasoningEffort)
+    ) {
+      return;
+    }
+
+    setPlannerReasoningEffort(
+      plannerReasoningOptions.at(-1)?.value ?? initialSettings.plannerReasoningEffort,
+    );
+  }, [
+    initialSettings.plannerReasoningEffort,
+    plannerReasoningEffort,
+    plannerReasoningOptions,
+  ]);
+
+  useEffect(() => {
+    if (
+      executionReasoningOptions.some((option) => option.value === executionReasoningEffort)
+    ) {
+      return;
+    }
+
+    setExecutionReasoningEffort(
+      executionReasoningOptions.at(-1)?.value ?? initialSettings.executionReasoningEffort,
+    );
+  }, [
+    executionReasoningEffort,
+    executionReasoningOptions,
+    initialSettings.executionReasoningEffort,
+  ]);
 
   function handleSave() {
     setSaving(true);
@@ -87,6 +129,7 @@ export function SettingsForm({
             plannerModel: plannerModel.trim() || null,
             executionModel: executionModel.trim() || null,
             plannerReasoningEffort,
+            executionReasoningEffort,
             defaultExecutionMode,
             defaultRepoSource,
             defaultQaStrictness,
@@ -169,22 +212,34 @@ export function SettingsForm({
 
             <label className="space-y-2">
               <span className="text-sm font-semibold text-[var(--color-ink)]">
-                Planning depth
+                Planning thinking level
               </span>
               <p className="text-sm leading-6 text-[var(--color-muted)]">
-                Higher depth asks Codex to spend more reasoning effort when building the plan.
+                Controls the Codex `model_reasoning_effort` used while turning a plan into tickets.
               </p>
-              <select
+              <CodexReasoningSelect
+                id="planner-reasoning-effort"
+                name="plannerReasoningEffort"
                 value={plannerReasoningEffort}
-                onChange={(event) =>
-                  setPlannerReasoningEffort(event.target.value as PlannerReasoningEffort)
-                }
-                className="glass-input w-full rounded-[22px] px-4 py-3"
-              >
-                <option value="low">Fast</option>
-                <option value="medium">Balanced</option>
-                <option value="high">Deep</option>
-              </select>
+                onChange={setPlannerReasoningEffort}
+                options={plannerReasoningOptions}
+              />
+            </label>
+
+            <label className="space-y-2">
+              <span className="text-sm font-semibold text-[var(--color-ink)]">
+                Agent thinking level
+              </span>
+              <p className="text-sm leading-6 text-[var(--color-muted)]">
+                Controls the Codex `model_reasoning_effort` used by Symphony agents during ticket execution.
+              </p>
+              <CodexReasoningSelect
+                id="execution-reasoning-effort"
+                name="executionReasoningEffort"
+                value={executionReasoningEffort}
+                onChange={setExecutionReasoningEffort}
+                options={executionReasoningOptions}
+              />
             </label>
 
             <label className="space-y-2">

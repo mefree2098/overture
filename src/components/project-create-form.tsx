@@ -1,8 +1,9 @@
 "use client";
 
+import { CodexReasoningSelect } from "@/components/codex-reasoning-select";
 import { CodexModelSelect } from "@/components/codex-model-select";
 import Link from "next/link";
-import { startTransition, useDeferredValue, useMemo, useState } from "react";
+import { startTransition, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ChevronDown,
@@ -13,11 +14,12 @@ import {
   Sparkles,
 } from "lucide-react";
 import type { CodexModelOption } from "@/lib/model-catalog";
+import { getCodexReasoningEffortOptions } from "@/lib/codex-reasoning";
 import { extractOutline } from "@/lib/spec-outline";
 import type {
   AppSettingsRecord,
+  CodexReasoningEffort,
   ExecutionMode,
-  PlannerReasoningEffort,
 } from "@/lib/types";
 
 const STARTER_TEMPLATE = `# Project plan
@@ -85,7 +87,9 @@ export function ProjectCreateForm({
   const [plannerModel, setPlannerModel] = useState(appSettings.plannerModel ?? "");
   const [executionModel, setExecutionModel] = useState(appSettings.executionModel ?? "");
   const [plannerReasoningEffort, setPlannerReasoningEffort] =
-    useState<PlannerReasoningEffort>(appSettings.plannerReasoningEffort);
+    useState<CodexReasoningEffort>(appSettings.plannerReasoningEffort);
+  const [executionReasoningEffort, setExecutionReasoningEffort] =
+    useState<CodexReasoningEffort>(appSettings.executionReasoningEffort);
   const [symphonyMaxConcurrentAgents, setSymphonyMaxConcurrentAgents] = useState(
     appSettings.symphonyMaxConcurrentAgents,
   );
@@ -96,6 +100,36 @@ export function ProjectCreateForm({
   const [error, setError] = useState<string | null>(null);
   const deferredSpecText = useDeferredValue(specText);
   const outline = extractOutline(deferredSpecText);
+  const plannerReasoningOptions = getCodexReasoningEffortOptions(plannerModel);
+  const executionReasoningOptions = getCodexReasoningEffortOptions(executionModel);
+
+  useEffect(() => {
+    if (
+      plannerReasoningOptions.some((option) => option.value === plannerReasoningEffort)
+    ) {
+      return;
+    }
+
+    setPlannerReasoningEffort(
+      plannerReasoningOptions.at(-1)?.value ?? appSettings.plannerReasoningEffort,
+    );
+  }, [appSettings.plannerReasoningEffort, plannerReasoningEffort, plannerReasoningOptions]);
+
+  useEffect(() => {
+    if (
+      executionReasoningOptions.some((option) => option.value === executionReasoningEffort)
+    ) {
+      return;
+    }
+
+    setExecutionReasoningEffort(
+      executionReasoningOptions.at(-1)?.value ?? appSettings.executionReasoningEffort,
+    );
+  }, [
+    appSettings.executionReasoningEffort,
+    executionReasoningEffort,
+    executionReasoningOptions,
+  ]);
 
   async function handleFileChange(file: File | undefined) {
     if (!file) {
@@ -124,6 +158,7 @@ export function ProjectCreateForm({
             plannerModel: plannerModel.trim() || null,
             executionModel: executionModel.trim() || null,
             plannerReasoningEffort,
+            executionReasoningEffort,
             symphonyMaxConcurrentAgents,
             symphonyMaxTurns,
             policyProfile: {
@@ -332,24 +367,18 @@ export function ProjectCreateForm({
 
               <label className="space-y-2">
                 <span className="text-sm font-semibold text-[var(--color-ink)]">
-                  Planning depth
+                  Planning thinking level
                 </span>
                 <p className="text-sm leading-6 text-[var(--color-muted)]">
-                  Controls how much extra thinking Codex spends while creating the plan.
+                  Controls the Codex `model_reasoning_effort` used while creating the plan.
                 </p>
-                <select
+                <CodexReasoningSelect
+                  id="project-planner-reasoning-effort"
+                  name="plannerReasoningEffort"
                   value={plannerReasoningEffort}
-                  onChange={(event) =>
-                    setPlannerReasoningEffort(
-                      event.target.value as PlannerReasoningEffort,
-                    )
-                  }
-                  className="glass-input w-full rounded-[22px] px-4 py-3"
-                >
-                  <option value="low">Fast</option>
-                  <option value="medium">Balanced</option>
-                  <option value="high">Deep</option>
-                </select>
+                  onChange={setPlannerReasoningEffort}
+                  options={plannerReasoningOptions}
+                />
               </label>
 
               <label className="space-y-2">
@@ -385,6 +414,22 @@ export function ProjectCreateForm({
                   options={modelOptions}
                   defaultLabel="Codex default"
                   defaultDescription="Use the saved default execution model from Settings."
+                />
+              </label>
+
+              <label className="space-y-2">
+                <span className="text-sm font-semibold text-[var(--color-ink)]">
+                  Agent thinking level
+                </span>
+                <p className="text-sm leading-6 text-[var(--color-muted)]">
+                  Controls the Codex `model_reasoning_effort` used by Symphony agents for this project.
+                </p>
+                <CodexReasoningSelect
+                  id="project-execution-reasoning-effort"
+                  name="executionReasoningEffort"
+                  value={executionReasoningEffort}
+                  onChange={setExecutionReasoningEffort}
+                  options={executionReasoningOptions}
                 />
               </label>
 

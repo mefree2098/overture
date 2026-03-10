@@ -29,13 +29,15 @@ describe("app settings", () => {
     expect(defaults.defaultExecutionMode).toBe("local_chatgpt");
     expect(defaults.plannerModel).toBeNull();
     expect(defaults.executionModel).toBeNull();
+    expect(defaults.executionReasoningEffort).toBe("medium");
     expect(defaults.symphonyMaxConcurrentAgents).toBe(2);
     expect(defaults.symphonyMaxTurns).toBe(24);
 
     const updated = settingsModule.updateAppSettings({
       plannerModel: "planner-x",
       executionModel: "executor-y",
-      plannerReasoningEffort: "high",
+      plannerReasoningEffort: "xhigh",
+      executionReasoningEffort: "high",
       defaultExecutionMode: "hosted_api",
       defaultRepoSource: "/tmp/workspace",
       defaultQaStrictness: 5,
@@ -46,7 +48,8 @@ describe("app settings", () => {
 
     expect(updated.plannerModel).toBe("planner-x");
     expect(updated.executionModel).toBe("executor-y");
-    expect(updated.plannerReasoningEffort).toBe("high");
+    expect(updated.plannerReasoningEffort).toBe("xhigh");
+    expect(updated.executionReasoningEffort).toBe("high");
     expect(updated.defaultExecutionMode).toBe("hosted_api");
     expect(updated.defaultRepoSource).toBe("/tmp/workspace");
     expect(updated.defaultQaStrictness).toBe(5);

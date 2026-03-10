@@ -40,6 +40,7 @@ function runMigrations(db: Database.Database) {
       planner_model TEXT,
       execution_model TEXT,
       planner_reasoning_effort TEXT NOT NULL DEFAULT 'low',
+      execution_reasoning_effort TEXT NOT NULL DEFAULT 'medium',
       symphony_max_concurrent_agents INTEGER NOT NULL DEFAULT 2,
       symphony_max_turns INTEGER NOT NULL DEFAULT 24,
       status TEXT NOT NULL,
@@ -57,6 +58,7 @@ function runMigrations(db: Database.Database) {
       planner_model TEXT,
       execution_model TEXT,
       planner_reasoning_effort TEXT NOT NULL,
+      execution_reasoning_effort TEXT NOT NULL,
       default_execution_mode TEXT NOT NULL,
       default_repo_source TEXT NOT NULL,
       default_qa_strictness INTEGER NOT NULL,
@@ -221,10 +223,22 @@ function runMigrations(db: Database.Database) {
   ensureColumn(
     db,
     "projects",
+    "execution_reasoning_effort",
+    "TEXT NOT NULL DEFAULT 'medium'",
+  );
+  ensureColumn(
+    db,
+    "projects",
     "symphony_max_concurrent_agents",
     "INTEGER NOT NULL DEFAULT 2",
   );
   ensureColumn(db, "projects", "symphony_max_turns", "INTEGER NOT NULL DEFAULT 24");
+  ensureColumn(
+    db,
+    "app_settings",
+    "execution_reasoning_effort",
+    "TEXT NOT NULL DEFAULT 'medium'",
+  );
 }
 
 export function getDb() {

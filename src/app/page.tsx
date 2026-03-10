@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Sparkles, Wand2 } from "lucide-react";
 import { ProjectCard } from "@/components/project-card";
 import { ProjectCreateForm } from "@/components/project-create-form";
+import { codexReasoningEffortLabel } from "@/lib/codex-reasoning";
 import { getCodexModelOptions } from "@/lib/model-catalog";
 import { getAppSettings } from "@/lib/server/app-settings";
 import { listProjects } from "@/lib/server/repository";
@@ -113,6 +114,22 @@ export default function HomePage() {
               </div>
               <div className="rounded-[24px] border border-white/8 bg-white/4 p-4">
                 <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--color-muted)]">
+                  Planning thinking
+                </p>
+                <p className="mt-2 text-base text-[var(--color-ink)]">
+                  {codexReasoningEffortLabel(appSettings.plannerReasoningEffort)}
+                </p>
+              </div>
+              <div className="rounded-[24px] border border-white/8 bg-white/4 p-4">
+                <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--color-muted)]">
+                  Agent thinking
+                </p>
+                <p className="mt-2 text-base text-[var(--color-ink)]">
+                  {codexReasoningEffortLabel(appSettings.executionReasoningEffort)}
+                </p>
+              </div>
+              <div className="rounded-[24px] border border-white/8 bg-white/4 p-4">
+                <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--color-muted)]">
                   Default run mode
                 </p>
                 <p className="mt-2 text-base text-[var(--color-ink)]">
@@ -144,7 +161,7 @@ export default function HomePage() {
                 <Sparkles className="h-4 w-4" />
               </Link>
               <span className="text-sm text-[var(--color-muted)]">
-                Settings control the default planning model, execution model, and run mode.
+                Settings control the default models, thinking levels, and run mode.
               </span>
             </div>
           </div>

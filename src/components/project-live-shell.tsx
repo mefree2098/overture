@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { PlanWorkbench } from "@/components/plan-workbench";
 import { StatusPill } from "@/components/status-pill";
+import { codexReasoningEffortLabel } from "@/lib/codex-reasoning";
 import type {
   ArtifactRecord,
   GateVerdict,
@@ -831,8 +832,16 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
                   <p className="mt-2">{snapshot.project.executionModel ?? "Codex default"}</p>
                 </div>
                 <div className="rounded-[22px] border border-white/8 bg-white/4 p-4">
-                  <p className="font-semibold text-[var(--color-ink)]">Planning depth</p>
-                  <p className="mt-2">{snapshot.project.plannerReasoningEffort}</p>
+                  <p className="font-semibold text-[var(--color-ink)]">Planning thinking</p>
+                  <p className="mt-2">
+                    {codexReasoningEffortLabel(snapshot.project.plannerReasoningEffort)}
+                  </p>
+                </div>
+                <div className="rounded-[22px] border border-white/8 bg-white/4 p-4">
+                  <p className="font-semibold text-[var(--color-ink)]">Agent thinking</p>
+                  <p className="mt-2">
+                    {codexReasoningEffortLabel(snapshot.project.executionReasoningEffort)}
+                  </p>
                 </div>
                 <div className="rounded-[22px] border border-white/8 bg-white/4 p-4">
                   <p className="font-semibold text-[var(--color-ink)]">Parallel workers / turns</p>

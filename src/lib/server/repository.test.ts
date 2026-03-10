@@ -77,7 +77,8 @@ describe("repository lifecycle", () => {
       executionMode: "local_chatgpt",
       plannerModel: "planner-x",
       executionModel: "executor-y",
-      plannerReasoningEffort: "medium",
+      plannerReasoningEffort: "xhigh",
+      executionReasoningEffort: "high",
       symphonyMaxConcurrentAgents: 3,
       symphonyMaxTurns: 30,
       specFilename: "plan.md",
@@ -88,7 +89,8 @@ describe("repository lifecycle", () => {
     expect(snapshotBeforeDelete?.project.slug).toBe(created.slug);
     expect(snapshotBeforeDelete?.project.plannerModel).toBe("planner-x");
     expect(snapshotBeforeDelete?.project.executionModel).toBe("executor-y");
-    expect(snapshotBeforeDelete?.project.plannerReasoningEffort).toBe("medium");
+    expect(snapshotBeforeDelete?.project.plannerReasoningEffort).toBe("xhigh");
+    expect(snapshotBeforeDelete?.project.executionReasoningEffort).toBe("high");
     expect(snapshotBeforeDelete?.project.symphonyMaxConcurrentAgents).toBe(3);
     expect(snapshotBeforeDelete?.project.symphonyMaxTurns).toBe(30);
 

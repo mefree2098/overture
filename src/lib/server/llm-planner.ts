@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { z } from "zod";
+import { normalizeCodexReasoningEffort } from "@/lib/codex-reasoning";
 import { getWorkspaceRoot } from "@/lib/server/storage";
 import {
   codexCliAvailable,
@@ -12,9 +13,9 @@ import {
 } from "@/lib/server/runtime-config";
 import { buildSpecIr } from "@/lib/server/spec-parser";
 import type {
+  CodexReasoningEffort,
   CreateProjectInput,
   DeploymentTarget,
-  PlannerReasoningEffort,
   SpecIR,
 } from "@/lib/types";
 
@@ -203,10 +204,9 @@ function runCodexPlanner(
       input.executionMode === "hosted_api"
         ? 'forced_login_method="api"'
         : 'forced_login_method="chatgpt"';
-    const reasoningEffort: PlannerReasoningEffort =
-      input.plannerReasoningEffort === "medium" || input.plannerReasoningEffort === "high"
-        ? input.plannerReasoningEffort
-        : "low";
+    const reasoningEffort: CodexReasoningEffort = normalizeCodexReasoningEffort(
+      input.plannerReasoningEffort,
+    );
     const args = [
       "exec",
       "--skip-git-repo-check",

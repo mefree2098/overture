@@ -30,7 +30,7 @@ docker run --rm -p 3000:3000 \
   overture:jetson
 ```
 5. Verify `GET /api/health`.
-6. Open `/settings` if you want to change planner or execution model defaults.
+6. Open `/settings` if you want to change planner or execution model defaults, or the planning / agent thinking levels.
 7. Seed or create a project, then launch Symphony with `npm run runner -- <project-id>`.
 
 ## What remains manual on real hardware

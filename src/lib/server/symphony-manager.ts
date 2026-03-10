@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { constants as fsConstants } from "node:fs";
 import { accessSync, openSync } from "node:fs";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import {
@@ -76,6 +76,10 @@ function runtimePaths(projectSlug: string) {
     bootstrapLogPath: path.join(runtimeRoot, "bootstrap.log"),
   };
 }
+
+const DEFAULT_BOOTSTRAP_LOG_TAIL_BYTES = Number(
+  process.env.OVERTURE_BOOTSTRAP_LOG_TAIL_BYTES ?? 128 * 1024,
+);
 
 function buildWorkspaceBootstrapCommand(repoSource: string) {
   if (
@@ -177,6 +181,8 @@ function buildWorkflow(
   const codexCommand = [
     shellQuote(codexBin),
     "app-server",
+    "-c",
+    shellQuote(`model_reasoning_effort="${project.executionReasoningEffort}"`),
     ...(project.executionModel ? ["--model", shellQuote(project.executionModel)] : []),
   ].join(" ");
 
@@ -254,14 +260,42 @@ function buildWorkflow(
   ].join("\n");
 }
 
-async function readLogTail(filePath: string, maxLines = 24) {
+export async function readLogTail(
+  filePath: string,
+  maxLines = 24,
+  maxBytes = DEFAULT_BOOTSTRAP_LOG_TAIL_BYTES,
+) {
   try {
-    const content = await readFile(filePath, "utf8");
-    return content
-      .trim()
-      .split("\n")
-      .slice(-maxLines)
-      .filter(Boolean);
+    const handle = await open(filePath, "r");
+
+    try {
+      const stats = await handle.stat();
+      const safeMaxBytes = Math.max(1024, maxBytes);
+      const start = Math.max(0, stats.size - safeMaxBytes);
+      const length = stats.size - start;
+
+      if (length <= 0) {
+        return [] as string[];
+      }
+
+      const buffer = Buffer.alloc(length);
+      await handle.read(buffer, 0, length, start);
+      let content = buffer.toString("utf8");
+
+      if (start > 0) {
+        const firstNewline = content.indexOf("\n");
+        content = firstNewline >= 0 ? content.slice(firstNewline + 1) : "";
+      }
+
+      return content
+        .replace(/\0/g, "")
+        .trim()
+        .split(/\r?\n/)
+        .slice(-maxLines)
+        .filter(Boolean);
+    } finally {
+      await handle.close();
+    }
   } catch {
     return [] as string[];
   }

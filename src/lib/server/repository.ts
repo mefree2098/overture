@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { DEFAULT_POLICY_PROFILE } from "@/lib/constants";
+import { normalizeCodexReasoningEffort } from "@/lib/codex-reasoning";
 import { getAppSettings } from "@/lib/server/app-settings";
 import { getDb } from "@/lib/server/db";
 import { buildSpecIrWithLlm } from "@/lib/server/llm-planner";
@@ -166,9 +167,13 @@ function hydrateProject(row: Record<string, unknown>): ProjectRecord {
         ? row.execution_model
         : null,
     plannerReasoningEffort:
-      row.planner_reasoning_effort === "medium" || row.planner_reasoning_effort === "high"
-        ? (row.planner_reasoning_effort as ProjectRecord["plannerReasoningEffort"])
-        : "low",
+      normalizeCodexReasoningEffort(
+        row.planner_reasoning_effort as string | null | undefined,
+      ),
+    executionReasoningEffort:
+      normalizeCodexReasoningEffort(
+        row.execution_reasoning_effort as string | null | undefined,
+      ),
     symphonyMaxConcurrentAgents: Number(row.symphony_max_concurrent_agents ?? 2),
     symphonyMaxTurns: Number(row.symphony_max_turns ?? 24),
     status: String(row.status),
@@ -893,6 +898,8 @@ export async function createProjectFromSpec(input: CreateProjectInput) {
       : input.executionModel?.trim() || null;
   const plannerReasoningEffort =
     input.plannerReasoningEffort ?? appSettings.plannerReasoningEffort;
+  const executionReasoningEffort =
+    input.executionReasoningEffort ?? appSettings.executionReasoningEffort;
   const symphonyMaxConcurrentAgents =
     input.symphonyMaxConcurrentAgents ?? appSettings.symphonyMaxConcurrentAgents;
   const symphonyMaxTurns = input.symphonyMaxTurns ?? appSettings.symphonyMaxTurns;
@@ -925,7 +932,8 @@ export async function createProjectFromSpec(input: CreateProjectInput) {
       `Execution mode: ${input.executionMode}`,
       `Planner model: ${plannerModel ?? "Codex default"}`,
       `Execution model: ${executionModel ?? "Codex default"}`,
-      `Planner reasoning effort: ${plannerReasoningEffort}`,
+      `Planning thinking level: ${plannerReasoningEffort}`,
+      `Agent thinking level: ${executionReasoningEffort}`,
       `Symphony parallel agents: ${symphonyMaxConcurrentAgents}`,
       `Symphony max turns: ${symphonyMaxTurns}`,
       "",
@@ -941,8 +949,8 @@ export async function createProjectFromSpec(input: CreateProjectInput) {
     db.prepare(
       `
         INSERT INTO projects (
-          id, slug, name, repo_source, execution_mode, planner_model, execution_model, planner_reasoning_effort, symphony_max_concurrent_agents, symphony_max_turns, status, health, qa_strictness, security_strictness, deployment_targets_json, created_at, updated_at, last_activity_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          id, slug, name, repo_source, execution_mode, planner_model, execution_model, planner_reasoning_effort, execution_reasoning_effort, symphony_max_concurrent_agents, symphony_max_turns, status, health, qa_strictness, security_strictness, deployment_targets_json, created_at, updated_at, last_activity_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
     ).run(
       projectId,
@@ -953,6 +961,7 @@ export async function createProjectFromSpec(input: CreateProjectInput) {
       plannerModel,
       executionModel,
       plannerReasoningEffort,
+      executionReasoningEffort,
       symphonyMaxConcurrentAgents,
       symphonyMaxTurns,
       "planned",
@@ -982,6 +991,7 @@ export async function createProjectFromSpec(input: CreateProjectInput) {
         plannerModel,
         executionModel,
         plannerReasoningEffort,
+        executionReasoningEffort,
         symphonyMaxConcurrentAgents,
         symphonyMaxTurns,
       }),
@@ -1097,7 +1107,8 @@ export async function createProjectFromSpec(input: CreateProjectInput) {
       `- Workflow contract: ${workflowPath}`,
       `- Planner model: ${plannerModel ?? "Codex default"}`,
       `- Execution model: ${executionModel ?? "Codex default"}`,
-      `- Planner reasoning effort: ${plannerReasoningEffort}`,
+      `- Planning thinking level: ${plannerReasoningEffort}`,
+      `- Agent thinking level: ${executionReasoningEffort}`,
       `- Symphony parallel agents: ${symphonyMaxConcurrentAgents}`,
       `- Symphony max turns: ${symphonyMaxTurns}`,
     ].join("\n"),
@@ -1120,6 +1131,7 @@ export async function createProjectFromSpec(input: CreateProjectInput) {
       plannerModel,
       executionModel,
       plannerReasoningEffort,
+      executionReasoningEffort,
     },
   });
 

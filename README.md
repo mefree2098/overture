@@ -18,7 +18,7 @@ The current app is a working Next.js control plane with SQLite persistence, real
 - Launches Symphony against a per-project workflow contract
 - Tracks gate readiness, runtime state, artifacts, findings, and audit history in the UI
 - Supports hard deletion of failed or stale projects from the dashboard and project page
-- Lets users choose planner and execution model defaults in `/settings`, with per-project overrides available in the intake flow
+- Lets users choose planner and execution model defaults plus Codex thinking levels in `/settings`, with per-project overrides available in the intake flow
 
 ## Runtime model
 
@@ -34,6 +34,12 @@ Model selection works like this:
 - If you leave the planner or execution model on `Codex default`, Overture lets the Codex CLI choose its default model
 - If you want explicit control, set default model names in `/settings`
 - If one project needs different model choices, open `Advanced project options` in the intake form and override them there
+
+Thinking level works like this:
+
+- Overture writes Codex `model_reasoning_effort` for both planning and Symphony ticket execution
+- The settings page exposes dropdowns for `Low`, `Medium`, `High`, and `Extra High`
+- `Extra High` is only offered for newer GPT-5 Codex-capable models; older selections automatically show the supported subset
 
 ## Stack
 
@@ -151,7 +157,8 @@ Open `/settings` in the UI to control:
 
 - Default planner model from the built-in Codex model dropdown
 - Default execution model from the built-in Codex model dropdown
-- Planner reasoning depth
+- Planning thinking level from the built-in Codex reasoning dropdown
+- Agent thinking level from the built-in Codex reasoning dropdown
 - Default execution mode
 - Default repository source
 - QA and security strictness defaults
@@ -238,9 +245,9 @@ npm audit --audit-level=high
 For a fast manual smoke after launching the app:
 
 1. Open `/`.
-2. If needed, open `/settings` and confirm the default model and run mode.
+2. If needed, open `/settings` and confirm the default model, thinking level, and run mode.
 3. Create or open a project.
-4. Confirm the overview page shows the captured planning and run settings.
+4. Confirm the overview page shows the captured planning, agent, and run settings.
 5. Start the automated run from the project page.
 6. Verify `/api/health` returns `ok: true`.
 7. Confirm the `Live run` tab shows either active work or a clear waiting explanation.

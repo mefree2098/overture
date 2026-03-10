@@ -1,10 +1,7 @@
 import { DEFAULT_APP_SETTINGS } from "@/lib/constants";
+import { normalizeCodexReasoningEffort } from "@/lib/codex-reasoning";
 import { getDb } from "@/lib/server/db";
-import type {
-  AppSettingsRecord,
-  ExecutionMode,
-  PlannerReasoningEffort,
-} from "@/lib/types";
+import type { AppSettingsRecord, ExecutionMode } from "@/lib/types";
 
 const SETTINGS_ROW_ID = "default";
 
@@ -25,18 +22,15 @@ function normalizeExecutionMode(value: string | null | undefined): ExecutionMode
   return value === "hosted_api" ? "hosted_api" : "local_chatgpt";
 }
 
-function normalizeReasoningEffort(
-  value: string | null | undefined,
-): PlannerReasoningEffort {
-  return value === "medium" || value === "high" ? value : "low";
-}
-
 function hydrateSettings(row: Record<string, unknown>): AppSettingsRecord {
   return {
     plannerModel: sanitizeOptionalModel(row.planner_model as string | null | undefined),
     executionModel: sanitizeOptionalModel(row.execution_model as string | null | undefined),
-    plannerReasoningEffort: normalizeReasoningEffort(
+    plannerReasoningEffort: normalizeCodexReasoningEffort(
       row.planner_reasoning_effort as string | null | undefined,
+    ),
+    executionReasoningEffort: normalizeCodexReasoningEffort(
+      row.execution_reasoning_effort as string | null | undefined,
     ),
     defaultExecutionMode: normalizeExecutionMode(
       row.default_execution_mode as string | null | undefined,
@@ -92,6 +86,7 @@ function ensureRow() {
         planner_model,
         execution_model,
         planner_reasoning_effort,
+        execution_reasoning_effort,
         default_execution_mode,
         default_repo_source,
         default_qa_strictness,
@@ -100,13 +95,14 @@ function ensureRow() {
         symphony_max_turns,
         created_at,
         updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
   ).run(
     SETTINGS_ROW_ID,
     DEFAULT_APP_SETTINGS.plannerModel,
     DEFAULT_APP_SETTINGS.executionModel,
     DEFAULT_APP_SETTINGS.plannerReasoningEffort,
+    DEFAULT_APP_SETTINGS.executionReasoningEffort,
     DEFAULT_APP_SETTINGS.defaultExecutionMode,
     DEFAULT_APP_SETTINGS.defaultRepoSource,
     DEFAULT_APP_SETTINGS.defaultQaStrictness,
@@ -139,8 +135,11 @@ export function updateAppSettings(
   const next = {
     plannerModel: sanitizeOptionalModel(updates.plannerModel ?? current.plannerModel),
     executionModel: sanitizeOptionalModel(updates.executionModel ?? current.executionModel),
-    plannerReasoningEffort: normalizeReasoningEffort(
+    plannerReasoningEffort: normalizeCodexReasoningEffort(
       updates.plannerReasoningEffort ?? current.plannerReasoningEffort,
+    ),
+    executionReasoningEffort: normalizeCodexReasoningEffort(
+      updates.executionReasoningEffort ?? current.executionReasoningEffort,
     ),
     defaultExecutionMode: normalizeExecutionMode(
       updates.defaultExecutionMode ?? current.defaultExecutionMode,
@@ -179,6 +178,7 @@ export function updateAppSettings(
         planner_model = ?,
         execution_model = ?,
         planner_reasoning_effort = ?,
+        execution_reasoning_effort = ?,
         default_execution_mode = ?,
         default_repo_source = ?,
         default_qa_strictness = ?,
@@ -192,6 +192,7 @@ export function updateAppSettings(
     next.plannerModel,
     next.executionModel,
     next.plannerReasoningEffort,
+    next.executionReasoningEffort,
     next.defaultExecutionMode,
     next.defaultRepoSource,
     next.defaultQaStrictness,

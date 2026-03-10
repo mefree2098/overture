@@ -8,7 +8,8 @@ import { getAppSettings, updateAppSettings } from "@/lib/server/app-settings";
 const settingsPatchSchema = z.object({
   plannerModel: z.string().max(120).nullable().optional(),
   executionModel: z.string().max(120).nullable().optional(),
-  plannerReasoningEffort: z.enum(["low", "medium", "high"]).optional(),
+  plannerReasoningEffort: z.enum(["low", "medium", "high", "xhigh"]).optional(),
+  executionReasoningEffort: z.enum(["low", "medium", "high", "xhigh"]).optional(),
   defaultExecutionMode: z.enum(["local_chatgpt", "hosted_api"]).optional(),
   defaultRepoSource: z.string().min(1).max(500).optional(),
   defaultQaStrictness: z.number().int().min(1).max(5).optional(),
