@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
 import { Settings2 } from "lucide-react";
 import { IBM_Plex_Mono, Oxanium } from "next/font/google";
@@ -19,6 +20,11 @@ export const metadata: Metadata = {
   title: "Overture",
   description:
     "Control plane for resumable AI software delivery with planning, gates, evidence, and deployment oversight.",
+  icons: {
+    icon: "/overtureicon.png",
+    shortcut: "/overtureicon.png",
+    apple: "/overtureicon.png",
+  },
 };
 
 export default function RootLayout({
@@ -42,8 +48,15 @@ export default function RootLayout({
                   href="/"
                   className="inline-flex items-center gap-4 text-sm text-[var(--color-muted)]"
                 >
-                  <span className="grid h-14 w-14 place-items-center rounded-[22px] border border-white/10 bg-[linear-gradient(160deg,rgba(123,240,255,0.28),rgba(143,166,255,0.14))] text-lg font-semibold text-[var(--color-ink)] shadow-[0_0_34px_rgba(123,240,255,0.18)]">
-                    OV
+                  <span className="grid h-14 w-14 place-items-center overflow-hidden rounded-[22px] border border-white/10 bg-[linear-gradient(160deg,rgba(123,240,255,0.28),rgba(143,166,255,0.14))] shadow-[0_0_34px_rgba(123,240,255,0.18)]">
+                    <Image
+                      src="/overtureicon.png"
+                      alt="Overture icon"
+                      width={56}
+                      height={56}
+                      className="h-full w-full object-cover"
+                      priority
+                    />
                   </span>
                   <span>
                     <span className="block font-mono text-[11px] uppercase tracking-[0.38em] text-[var(--color-accent)]">

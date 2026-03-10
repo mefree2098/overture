@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./icon.png" alt="Overture logo" width="320" />
+  <img src="./overtureicon.png" alt="Overture logo" width="320" />
 </p>
 
 # Overture
