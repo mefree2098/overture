@@ -43,10 +43,6 @@ export function stripAnsi(value: string) {
     .trim();
 }
 
-function escapeRegExp(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 export function rewriteSummaryForProjectName(
   summary: string,
   nextProjectName: string,
@@ -65,8 +61,9 @@ export function rewriteSummaryForProjectName(
   }
 
   if (trimmedPreviousName && trimmedPreviousName !== trimmedNextName) {
-    const exactNamePattern = new RegExp(escapeRegExp(trimmedPreviousName), "g");
-    const replacedExactName = trimmedSummary.replace(exactNamePattern, trimmedNextName);
+    const replacedExactName = trimmedSummary
+      .split(trimmedPreviousName)
+      .join(trimmedNextName);
 
     if (replacedExactName !== trimmedSummary) {
       return replacedExactName;

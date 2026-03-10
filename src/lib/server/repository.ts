@@ -3,8 +3,14 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { DEFAULT_POLICY_PROFILE } from "@/lib/constants";
 import { normalizeCodexReasoningEffort } from "@/lib/codex-reasoning";
+import {
+  normalizeLifecycleStage,
+  normalizeResearchProvider,
+  normalizeWorkshopSearchMode,
+} from "@/lib/project-pipeline";
 import { getAppSettings } from "@/lib/server/app-settings";
 import { getDb } from "@/lib/server/db";
+import { detectOperationalProfiles } from "@/lib/server/launch-profiles";
 import { buildSpecIrWithLlm } from "@/lib/server/llm-planner";
 import { generatePlanFromSpec } from "@/lib/server/plan-generator";
 import { hydrateStoredProjectTokenUsage } from "@/lib/server/project-token-usage";
@@ -22,19 +28,28 @@ import {
 import type {
   ArtifactRecord,
   AuditEventRecord,
+  CreateDraftProjectInput,
   CreateProjectInput,
+  DeployProfileRecord,
+  DeployRunRecord,
   DependencyEdgeRecord,
   FindingRecord,
   GateStatusRecord,
+  LaunchProfileRecord,
+  LaunchRunRecord,
   PlanVersionRecord,
   ProjectRecord,
   ProjectSnapshot,
   ProjectSummary,
+  ProjectLifecycleStage,
+  ResearchRunRecord,
   RunRecord,
   SpecDocumentRecord,
   TrackerIssue,
   WorkItemRecord,
   WorkItemStatus,
+  WorkshopMessageRecord,
+  WorkshopThreadRecord,
 } from "@/lib/types";
 import { rewriteSummaryForProjectName, slugify, tryParseJson } from "@/lib/utils";
 
@@ -134,7 +149,10 @@ function resolveGateSnapshot(
       : "pending";
   const deployStatus = hasOpenDeployFinding
     ? "fail"
-    : deployTasksComplete || artifacts.some((artifact) => artifact.kind === "deploy-plan")
+    : deployTasksComplete ||
+        artifacts.some((artifact) =>
+          ["deploy-plan", "deployment-report", "launch-report"].includes(artifact.kind),
+        )
       ? "pass"
       : "pending";
   const releaseStatus =
@@ -172,6 +190,12 @@ function hydrateProject(row: Record<string, unknown>): ProjectRecord {
     name: String(row.name),
     repoSource: String(row.repo_source),
     executionMode: row.execution_mode as ProjectRecord["executionMode"],
+    lifecycleStage: normalizeLifecycleStage(
+      row.lifecycle_stage as string | null | undefined,
+    ),
+    researchProvider: normalizeResearchProvider(
+      row.research_provider as string | null | undefined,
+    ),
     plannerModel:
       typeof row.planner_model === "string" && row.planner_model.trim()
         ? row.planner_model
@@ -377,6 +401,149 @@ function hydrateGateStatus(row: Record<string, unknown> | undefined): GateStatus
   };
 }
 
+function hydrateWorkshopThread(row: Record<string, unknown>): WorkshopThreadRecord {
+  return {
+    id: String(row.id),
+    projectId: String(row.project_id),
+    codexThreadId: String(row.codex_thread_id),
+    title: typeof row.title === "string" ? row.title : null,
+    status: row.status === "archived" ? "archived" : "active",
+    searchMode: normalizeWorkshopSearchMode(
+      row.search_mode as string | null | undefined,
+    ),
+    promptDraft: String(row.prompt_draft ?? ""),
+    summary: String(row.summary ?? ""),
+    repoContext: typeof row.repo_context === "string" ? row.repo_context : null,
+    metadata: tryParseJson(row.metadata_json as string),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+function hydrateWorkshopMessage(row: Record<string, unknown>): WorkshopMessageRecord {
+  return {
+    id: String(row.id),
+    projectId: String(row.project_id),
+    workshopThreadId: String(row.workshop_thread_id),
+    role:
+      row.role === "assistant" || row.role === "system" ? row.role : "user",
+    content: String(row.content ?? ""),
+    metadata: tryParseJson(row.metadata_json as string),
+    createdAt: String(row.created_at),
+  };
+}
+
+function hydrateResearchRun(row: Record<string, unknown>): ResearchRunRecord {
+  return {
+    id: String(row.id),
+    projectId: String(row.project_id),
+    provider: normalizeResearchProvider(
+      row.provider as string | null | undefined,
+    ),
+    status:
+      row.status === "running" ||
+      row.status === "completed" ||
+      row.status === "failed"
+        ? row.status
+        : "queued",
+    searchMode: normalizeWorkshopSearchMode(
+      row.search_mode as string | null | undefined,
+    ),
+    promptArtifactId: typeof row.prompt_artifact_id === "string" ? row.prompt_artifact_id : null,
+    reportArtifactId:
+      typeof row.report_artifact_id === "string" ? row.report_artifact_id : null,
+    planArtifactId: typeof row.plan_artifact_id === "string" ? row.plan_artifact_id : null,
+    citationsArtifactId:
+      typeof row.citations_artifact_id === "string" ? row.citations_artifact_id : null,
+    summaryArtifactId:
+      typeof row.summary_artifact_id === "string" ? row.summary_artifact_id : null,
+    summary: String(row.summary ?? ""),
+    metadata: tryParseJson(row.metadata_json as string),
+    startedAt: String(row.started_at),
+    completedAt: typeof row.completed_at === "string" ? row.completed_at : null,
+  };
+}
+
+function hydrateLaunchProfile(row: Record<string, unknown>): LaunchProfileRecord {
+  return {
+    id: String(row.id),
+    projectId: String(row.project_id),
+    target:
+      row.target === "api" || row.target === "docker" || row.target === "ios_simulator"
+        ? row.target
+        : "web",
+    label: String(row.label),
+    command: String(row.command),
+    cwd: String(row.cwd),
+    healthcheckUrl:
+      typeof row.healthcheck_url === "string" ? row.healthcheck_url : null,
+    metadata: tryParseJson(row.metadata_json as string),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+function hydrateLaunchRun(row: Record<string, unknown>): LaunchRunRecord {
+  return {
+    id: String(row.id),
+    projectId: String(row.project_id),
+    launchProfileId: String(row.launch_profile_id),
+    status:
+      row.status === "running" ||
+      row.status === "completed" ||
+      row.status === "failed"
+        ? row.status
+        : "queued",
+    summary: String(row.summary ?? ""),
+    logPath: String(row.log_path ?? ""),
+    metadata: tryParseJson(row.metadata_json as string),
+    startedAt: String(row.started_at),
+    completedAt: typeof row.completed_at === "string" ? row.completed_at : null,
+  };
+}
+
+function hydrateDeployProfile(row: Record<string, unknown>): DeployProfileRecord {
+  return {
+    id: String(row.id),
+    projectId: String(row.project_id),
+    target:
+      row.target === "jetson" ||
+      row.target === "raspberry_pi" ||
+      row.target === "azure" ||
+      row.target === "aws" ||
+      row.target === "ios_testflight" ||
+      row.target === "ios_app_store"
+        ? row.target
+        : "local",
+    label: String(row.label),
+    command: String(row.command),
+    cwd: String(row.cwd),
+    approvalRequired: Boolean(row.approval_required),
+    metadata: tryParseJson(row.metadata_json as string),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+function hydrateDeployRun(row: Record<string, unknown>): DeployRunRecord {
+  return {
+    id: String(row.id),
+    projectId: String(row.project_id),
+    deployProfileId: String(row.deploy_profile_id),
+    status:
+      row.status === "running" ||
+      row.status === "completed" ||
+      row.status === "failed"
+        ? row.status
+        : "queued",
+    summary: String(row.summary ?? ""),
+    logPath: String(row.log_path ?? ""),
+    metadata: tryParseJson(row.metadata_json as string),
+    startedAt: String(row.started_at),
+    completedAt: typeof row.completed_at === "string" ? row.completed_at : null,
+  };
+}
+
 function countWorkItems(workItems: WorkItemRecord[]) {
   const counts: ProjectSummary["counts"] = {
     queued: 0,
@@ -479,7 +646,7 @@ export function writeArtifact(input: {
   label: string;
   extension: string;
   mimeType: string;
-  content: string;
+  content: string | Buffer;
   metadata?: Record<string, unknown>;
 }) {
   const db = getDb();
@@ -487,7 +654,11 @@ export function writeArtifact(input: {
   const projectArtifactsRoot = getProjectArtifactsRoot(input.projectSlug);
   const fileName = `${artifactId}.${input.extension.replace(/^\./, "")}`;
   const filePath = path.join(projectArtifactsRoot, fileName);
-  writeFileSync(filePath, input.content, "utf8");
+  if (typeof input.content === "string") {
+    writeFileSync(filePath, input.content, "utf8");
+  } else {
+    writeFileSync(filePath, input.content);
+  }
 
   db.prepare(
     `
@@ -691,6 +862,999 @@ function settleProjectState(projectId: string) {
   return changed;
 }
 
+function nextProjectSlug(db: ReturnType<typeof getDb>, name: string, projectId: string) {
+  const slugBase = slugify(name) || `project-${projectId.slice(0, 8)}`;
+  let slug = slugBase;
+  let counter = 2;
+
+  while (db.prepare("SELECT id FROM projects WHERE slug = ?").get(slug)) {
+    slug = `${slugBase}-${counter++}`;
+  }
+
+  return slug;
+}
+
+function resolveProjectDefaults(
+  input:
+    | CreateDraftProjectInput
+    | CreateProjectInput,
+  appSettings = getAppSettings(),
+) {
+  const plannerModel =
+    input.plannerModel === undefined
+      ? appSettings.plannerModel
+      : input.plannerModel?.trim() || null;
+  const executionModel =
+    input.executionModel === undefined
+      ? appSettings.executionModel
+      : input.executionModel?.trim() || null;
+
+  return {
+    repoSource: normalizeRepoSource(input.repoSource),
+    researchProvider:
+      input.researchProvider ?? appSettings.defaultResearchProvider,
+    plannerModel,
+    executionModel,
+    plannerReasoningEffort:
+      input.plannerReasoningEffort ?? appSettings.plannerReasoningEffort,
+    executionReasoningEffort:
+      input.executionReasoningEffort ?? appSettings.executionReasoningEffort,
+    symphonyMaxConcurrentAgents:
+      input.symphonyMaxConcurrentAgents ?? appSettings.symphonyMaxConcurrentAgents,
+    symphonyMaxTurns: input.symphonyMaxTurns ?? appSettings.symphonyMaxTurns,
+  };
+}
+
+function insertProjectRecord(input: {
+  id: string;
+  slug: string;
+  name: string;
+  repoSource: string;
+  executionMode: ProjectRecord["executionMode"];
+  lifecycleStage: ProjectLifecycleStage;
+  researchProvider: ProjectRecord["researchProvider"];
+  plannerModel: string | null;
+  executionModel: string | null;
+  plannerReasoningEffort: ProjectRecord["plannerReasoningEffort"];
+  executionReasoningEffort: ProjectRecord["executionReasoningEffort"];
+  qaStrictness: number;
+  securityStrictness: number;
+  deploymentTargets: ProjectRecord["deploymentTargets"];
+  symphonyMaxConcurrentAgents: number;
+  symphonyMaxTurns: number;
+  timestamp: string;
+}) {
+  const db = getDb();
+
+  db.prepare(
+    `
+      INSERT INTO projects (
+        id, slug, name, repo_source, execution_mode, lifecycle_stage, research_provider, planner_model, execution_model, planner_reasoning_effort, execution_reasoning_effort, symphony_max_concurrent_agents, symphony_max_turns, status, health, qa_strictness, security_strictness, deployment_targets_json, cumulative_input_tokens, cumulative_output_tokens, cumulative_total_tokens, created_at, updated_at, last_activity_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+  ).run(
+    input.id,
+    input.slug,
+    input.name,
+    input.repoSource,
+    input.executionMode,
+    input.lifecycleStage,
+    input.researchProvider,
+    input.plannerModel,
+    input.executionModel,
+    input.plannerReasoningEffort,
+    input.executionReasoningEffort,
+    input.symphonyMaxConcurrentAgents,
+    input.symphonyMaxTurns,
+    input.lifecycleStage === "draft" ? "draft" : "planned",
+    "on_track",
+    input.qaStrictness,
+    input.securityStrictness,
+    serialise(input.deploymentTargets),
+    0,
+    0,
+    0,
+    input.timestamp,
+    input.timestamp,
+    input.timestamp,
+  );
+}
+
+export function setProjectLifecycleStage(
+  projectId: string,
+  lifecycleStage: ProjectLifecycleStage,
+) {
+  const db = getDb();
+  const timestamp = nowIso();
+
+  db.prepare(
+    `
+      UPDATE projects
+      SET lifecycle_stage = ?, status = ?, updated_at = ?, last_activity_at = ?
+      WHERE id = ?
+    `,
+  ).run(
+    lifecycleStage,
+    lifecycleStage,
+    timestamp,
+    timestamp,
+    projectId,
+  );
+}
+
+export function createDraftProject(input: CreateDraftProjectInput) {
+  const db = getDb();
+  const appSettings = getAppSettings();
+  const timestamp = nowIso();
+  const projectId = randomUUID();
+  const slug = nextProjectSlug(db, input.name, projectId);
+  const defaults = resolveProjectDefaults(input, appSettings);
+  const policyProfile = {
+    ...DEFAULT_POLICY_PROFILE,
+    qaStrictness: appSettings.defaultQaStrictness,
+    securityStrictness: appSettings.defaultSecurityStrictness,
+  };
+
+  insertProjectRecord({
+    id: projectId,
+    slug,
+    name: input.name.trim(),
+    repoSource: defaults.repoSource,
+    executionMode: input.executionMode,
+    lifecycleStage: "draft",
+    researchProvider: defaults.researchProvider,
+    plannerModel: defaults.plannerModel,
+    executionModel: defaults.executionModel,
+    plannerReasoningEffort: defaults.plannerReasoningEffort,
+    executionReasoningEffort: defaults.executionReasoningEffort,
+    qaStrictness: policyProfile.qaStrictness,
+    securityStrictness: policyProfile.securityStrictness,
+    deploymentTargets: DEFAULT_POLICY_PROFILE.deploymentTargets,
+    symphonyMaxConcurrentAgents: defaults.symphonyMaxConcurrentAgents,
+    symphonyMaxTurns: defaults.symphonyMaxTurns,
+    timestamp,
+  });
+
+  appendAuditEvent({
+    projectId,
+    actor: "system",
+    action: "project.draft_created",
+    detail: `Created draft project ${input.name.trim()}.`,
+    payload: {
+      slug,
+      researchProvider: defaults.researchProvider,
+      plannerModel: defaults.plannerModel,
+      executionModel: defaults.executionModel,
+    },
+  });
+
+  if (input.sourceBriefText?.trim()) {
+    const sourceBriefFilename = input.sourceBriefFilename?.trim() || "source-brief.md";
+    const extension =
+      path.extname(sourceBriefFilename).replace(/^\./, "").trim() || "md";
+
+    writeArtifact({
+      projectId,
+      projectSlug: slug,
+      kind: "source-brief",
+      label: sourceBriefFilename,
+      extension,
+      mimeType: "text/markdown",
+      content: input.sourceBriefText.trim(),
+      metadata: {
+        filename: sourceBriefFilename,
+        lifecycleStage: "draft",
+      },
+    });
+
+    appendAuditEvent({
+      projectId,
+      actor: "system",
+      action: "project.source_brief_stored",
+      detail: `Stored source brief ${sourceBriefFilename} for guided planning.`,
+    });
+  }
+
+  return {
+    projectId,
+    slug,
+  };
+}
+
+export function getLatestWorkshopThread(projectId: string) {
+  const db = getDb();
+  const row = db
+    .prepare(
+      "SELECT * FROM workshop_threads WHERE project_id = ? ORDER BY updated_at DESC, created_at DESC, rowid DESC LIMIT 1",
+    )
+    .get(projectId) as Record<string, unknown> | undefined;
+
+  return row ? hydrateWorkshopThread(row) : null;
+}
+
+export function createWorkshopFork(projectId: string) {
+  const db = getDb();
+  const latestThread = getLatestWorkshopThread(projectId);
+
+  if (!latestThread) {
+    throw new Error("No workshop thread exists for this project yet.");
+  }
+
+  const timestamp = nowIso();
+  const forkId = randomUUID();
+  const forkTitle = latestThread.title ? `${latestThread.title} (Fork)` : "Prompt workshop fork";
+
+  db.transaction(() => {
+    db.prepare(
+      `
+        INSERT INTO workshop_threads (
+          id, project_id, codex_thread_id, title, status, search_mode, prompt_draft, summary, repo_context, metadata_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+    ).run(
+      forkId,
+      projectId,
+      "",
+      forkTitle,
+      "active",
+      latestThread.searchMode,
+      latestThread.promptDraft,
+      latestThread.summary,
+      latestThread.repoContext,
+      serialise({
+        ...latestThread.metadata,
+        forkedFromWorkshopThreadId: latestThread.id,
+      }),
+      timestamp,
+      timestamp,
+    );
+
+    db.prepare(
+      `
+        UPDATE projects
+        SET lifecycle_stage = ?, status = ?, updated_at = ?, last_activity_at = ?
+        WHERE id = ?
+      `,
+    ).run("workshop_active", "workshop_active", timestamp, timestamp, projectId);
+  })();
+
+  appendAuditEvent({
+    projectId,
+    actor: "workshop",
+    action: "workshop.fork_created",
+    detail: "Created a fork of the current workshop prompt.",
+    payload: {
+      sourceWorkshopThreadId: latestThread.id,
+      forkWorkshopThreadId: forkId,
+    },
+  });
+
+  return {
+    workshopThreadId: forkId,
+  };
+}
+
+export function listWorkshopMessages(projectId: string, workshopThreadId: string) {
+  const db = getDb();
+
+  return db
+    .prepare(
+      `
+        SELECT * FROM workshop_messages
+        WHERE project_id = ? AND workshop_thread_id = ?
+        ORDER BY created_at ASC
+      `,
+    )
+    .all(projectId, workshopThreadId)
+    .map((row) => hydrateWorkshopMessage(row as Record<string, unknown>));
+}
+
+export function recordWorkshopTurn(input: {
+  projectId: string;
+  codexThreadId: string;
+  title?: string | null;
+  searchMode: WorkshopThreadRecord["searchMode"];
+  promptDraft: string;
+  summary: string;
+  repoContext?: string | null;
+  userMessage: string;
+  assistantMessage: string;
+  readyForResearch: boolean;
+  openQuestions: string[];
+}) {
+  const db = getDb();
+  const project = db
+    .prepare("SELECT * FROM projects WHERE id = ?")
+    .get(input.projectId) as Record<string, unknown> | undefined;
+
+  if (!project) {
+    throw new Error("Project not found.");
+  }
+
+  const existing = db
+    .prepare(
+      `
+        SELECT * FROM workshop_threads
+        WHERE project_id = ? AND codex_thread_id = ?
+        LIMIT 1
+      `,
+    )
+    .get(input.projectId, input.codexThreadId) as Record<string, unknown> | undefined;
+  const timestamp = nowIso();
+  const workshopThreadId = existing ? String(existing.id) : randomUUID();
+  const metadata = {
+    readyForResearch: input.readyForResearch,
+    openQuestions: input.openQuestions,
+  };
+
+  db.transaction(() => {
+    if (existing) {
+      db.prepare(
+        `
+          UPDATE workshop_threads
+          SET title = ?, search_mode = ?, prompt_draft = ?, summary = ?, repo_context = ?, metadata_json = ?, updated_at = ?
+          WHERE id = ?
+        `,
+      ).run(
+        input.title ?? null,
+        input.searchMode,
+        input.promptDraft,
+        input.summary,
+        input.repoContext ?? null,
+        serialise(metadata),
+        timestamp,
+        workshopThreadId,
+      );
+    } else {
+      db.prepare(
+        `
+          INSERT INTO workshop_threads (
+            id, project_id, codex_thread_id, title, status, search_mode, prompt_draft, summary, repo_context, metadata_json, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      ).run(
+        workshopThreadId,
+        input.projectId,
+        input.codexThreadId,
+        input.title ?? null,
+        "active",
+        input.searchMode,
+        input.promptDraft,
+        input.summary,
+        input.repoContext ?? null,
+        serialise(metadata),
+        timestamp,
+        timestamp,
+      );
+    }
+
+    const insertMessage = db.prepare(
+      `
+        INSERT INTO workshop_messages (
+          id, project_id, workshop_thread_id, role, content, metadata_json, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      `,
+    );
+
+    insertMessage.run(
+      randomUUID(),
+      input.projectId,
+      workshopThreadId,
+      "user",
+      input.userMessage,
+      serialise({}),
+      timestamp,
+    );
+
+    insertMessage.run(
+      randomUUID(),
+      input.projectId,
+      workshopThreadId,
+      "assistant",
+      input.assistantMessage,
+      serialise({
+        openQuestions: input.openQuestions,
+        readyForResearch: input.readyForResearch,
+      }),
+      timestamp,
+    );
+
+    db.prepare(
+      `
+        UPDATE projects
+        SET lifecycle_stage = ?, status = ?, updated_at = ?, last_activity_at = ?
+        WHERE id = ?
+      `,
+    ).run(
+      input.readyForResearch ? "research_ready" : "workshop_active",
+      input.readyForResearch ? "research_ready" : "workshop_active",
+      timestamp,
+      timestamp,
+      input.projectId,
+    );
+  })();
+
+  appendAuditEvent({
+    projectId: input.projectId,
+    actor: "workshop",
+    action: "workshop.turn_recorded",
+    detail: input.readyForResearch
+      ? "Workshop updated and is ready for a research run."
+      : "Workshop turn recorded.",
+    payload: {
+      codexThreadId: input.codexThreadId,
+      readyForResearch: input.readyForResearch,
+      openQuestions: input.openQuestions,
+    },
+  });
+
+  return {
+    workshopThreadId,
+  };
+}
+
+export function lockWorkshopPrompt(projectId: string) {
+  const snapshot = getProjectSnapshot(projectId);
+
+  if (!snapshot?.workshopThread) {
+    throw new Error("No workshop thread exists for this project yet.");
+  }
+
+  const openQuestions = Array.isArray(snapshot.workshopThread.metadata.openQuestions)
+    ? (snapshot.workshopThread.metadata.openQuestions as unknown[])
+        .map((item) => String(item).trim())
+        .filter(Boolean)
+    : [];
+  const promptArtifactId = writeArtifact({
+    projectId: snapshot.project.id,
+    projectSlug: snapshot.project.slug,
+    kind: "research-prompt",
+    label: "Canonical research prompt",
+    extension: "md",
+    mimeType: "text/markdown",
+    content: snapshot.workshopThread.promptDraft,
+    metadata: {
+      workshopThreadId: snapshot.workshopThread.id,
+      codexThreadId: snapshot.workshopThread.codexThreadId,
+    },
+  });
+  const summaryArtifactId = writeArtifact({
+    projectId: snapshot.project.id,
+    projectSlug: snapshot.project.slug,
+    kind: "workshop-summary",
+    label: "Workshop summary",
+    extension: "md",
+    mimeType: "text/markdown",
+    content: snapshot.workshopThread.summary,
+    metadata: {
+      workshopThreadId: snapshot.workshopThread.id,
+    },
+  });
+  const questionsArtifactId = writeArtifact({
+    projectId: snapshot.project.id,
+    projectSlug: snapshot.project.slug,
+    kind: "open-questions",
+    label: "Open questions",
+    extension: "json",
+    mimeType: "application/json",
+    content: JSON.stringify(openQuestions, null, 2),
+    metadata: {
+      workshopThreadId: snapshot.workshopThread.id,
+    },
+  });
+
+  setProjectLifecycleStage(projectId, "research_ready");
+  appendAuditEvent({
+    projectId,
+    actor: "workshop",
+    action: "workshop.prompt_locked",
+    detail: "Locked a canonical research prompt for the next research run.",
+    payload: {
+      promptArtifactId,
+      summaryArtifactId,
+      questionsArtifactId,
+    },
+  });
+
+  return {
+    promptArtifactId,
+    summaryArtifactId,
+    questionsArtifactId,
+  };
+}
+
+export function createResearchRunRecord(input: {
+  projectId: string;
+  provider: ResearchRunRecord["provider"];
+  searchMode: ResearchRunRecord["searchMode"];
+  promptArtifactId?: string | null;
+  metadata?: Record<string, unknown>;
+}) {
+  const db = getDb();
+  const runId = randomUUID();
+  const timestamp = nowIso();
+
+  db.prepare(
+    `
+      INSERT INTO research_runs (
+        id, project_id, provider, status, search_mode, prompt_artifact_id, report_artifact_id, plan_artifact_id, citations_artifact_id, summary_artifact_id, summary, metadata_json, started_at, completed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+  ).run(
+    runId,
+    input.projectId,
+    input.provider,
+    "running",
+    input.searchMode,
+    input.promptArtifactId ?? null,
+    null,
+    null,
+    null,
+    null,
+    "Research run is starting.",
+    serialise(input.metadata ?? {}),
+    timestamp,
+    null,
+  );
+
+  setProjectLifecycleStage(input.projectId, "research_running");
+  appendAuditEvent({
+    projectId: input.projectId,
+    actor: "research",
+    action: "research.started",
+    detail: `Research run started via ${input.provider}.`,
+    payload: {
+      researchRunId: runId,
+      promptArtifactId: input.promptArtifactId ?? null,
+      searchMode: input.searchMode,
+    },
+  });
+
+  return runId;
+}
+
+export function completeResearchRunRecord(input: {
+  researchRunId: string;
+  projectId: string;
+  summary: string;
+  reportArtifactId?: string | null;
+  planArtifactId?: string | null;
+  citationsArtifactId?: string | null;
+  summaryArtifactId?: string | null;
+  metadata?: Record<string, unknown>;
+}) {
+  const db = getDb();
+  const timestamp = nowIso();
+
+  db.prepare(
+    `
+      UPDATE research_runs
+      SET
+        status = 'completed',
+        summary = ?,
+        report_artifact_id = ?,
+        plan_artifact_id = ?,
+        citations_artifact_id = ?,
+        summary_artifact_id = ?,
+        metadata_json = ?,
+        completed_at = ?
+      WHERE id = ?
+    `,
+  ).run(
+    input.summary,
+    input.reportArtifactId ?? null,
+    input.planArtifactId ?? null,
+    input.citationsArtifactId ?? null,
+    input.summaryArtifactId ?? null,
+    serialise(input.metadata ?? {}),
+    timestamp,
+    input.researchRunId,
+  );
+
+  setProjectLifecycleStage(input.projectId, "plan_review");
+  appendAuditEvent({
+    projectId: input.projectId,
+    actor: "research",
+    action: "research.completed",
+    detail: input.summary,
+    payload: {
+      researchRunId: input.researchRunId,
+      reportArtifactId: input.reportArtifactId ?? null,
+      planArtifactId: input.planArtifactId ?? null,
+    },
+  });
+}
+
+export function failResearchRunRecord(input: {
+  researchRunId: string;
+  projectId: string;
+  summary: string;
+  metadata?: Record<string, unknown>;
+}) {
+  const db = getDb();
+  const timestamp = nowIso();
+
+  db.prepare(
+    `
+      UPDATE research_runs
+      SET status = 'failed', summary = ?, metadata_json = ?, completed_at = ?
+      WHERE id = ?
+    `,
+  ).run(
+    input.summary,
+    serialise(input.metadata ?? {}),
+    timestamp,
+    input.researchRunId,
+  );
+
+  setProjectLifecycleStage(input.projectId, "failed");
+  appendAuditEvent({
+    projectId: input.projectId,
+    actor: "research",
+    action: "research.failed",
+    detail: input.summary,
+    payload: {
+      researchRunId: input.researchRunId,
+      ...(input.metadata ?? {}),
+    },
+  });
+}
+
+export function createLaunchRunRecord(input: {
+  projectId: string;
+  launchProfileId: string;
+  summary: string;
+  logPath: string;
+  metadata?: Record<string, unknown>;
+}) {
+  const db = getDb();
+  const runId = randomUUID();
+  const timestamp = nowIso();
+
+  db.prepare(
+    `
+      INSERT INTO launch_runs (
+        id, project_id, launch_profile_id, status, summary, log_path, metadata_json, started_at, completed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+  ).run(
+    runId,
+    input.projectId,
+    input.launchProfileId,
+    "running",
+    input.summary,
+    input.logPath,
+    serialise(input.metadata ?? {}),
+    timestamp,
+    null,
+  );
+
+  setProjectLifecycleStage(input.projectId, "launch_running");
+  appendAuditEvent({
+    projectId: input.projectId,
+    actor: "launch",
+    action: "launch.started",
+    detail: input.summary,
+    payload: {
+      launchRunId: runId,
+      launchProfileId: input.launchProfileId,
+      logPath: input.logPath,
+      ...input.metadata,
+    },
+  });
+
+  return runId;
+}
+
+export function completeLaunchRunRecord(input: {
+  launchRunId: string;
+  projectId: string;
+  summary: string;
+  metadata?: Record<string, unknown>;
+}) {
+  const db = getDb();
+  const timestamp = nowIso();
+
+  db.prepare(
+    `
+      UPDATE launch_runs
+      SET status = 'completed', summary = ?, metadata_json = ?, completed_at = ?
+      WHERE id = ?
+    `,
+  ).run(input.summary, serialise(input.metadata ?? {}), timestamp, input.launchRunId);
+
+  setProjectLifecycleStage(input.projectId, "launch_complete");
+  appendAuditEvent({
+    projectId: input.projectId,
+    actor: "launch",
+    action: "launch.completed",
+    detail: input.summary,
+    payload: {
+      launchRunId: input.launchRunId,
+      ...(input.metadata ?? {}),
+    },
+  });
+}
+
+export function failLaunchRunRecord(input: {
+  launchRunId: string;
+  projectId: string;
+  summary: string;
+  metadata?: Record<string, unknown>;
+}) {
+  const db = getDb();
+  const timestamp = nowIso();
+
+  db.prepare(
+    `
+      UPDATE launch_runs
+      SET status = 'failed', summary = ?, metadata_json = ?, completed_at = ?
+      WHERE id = ?
+    `,
+  ).run(input.summary, serialise(input.metadata ?? {}), timestamp, input.launchRunId);
+
+  setProjectLifecycleStage(input.projectId, "failed");
+  appendAuditEvent({
+    projectId: input.projectId,
+    actor: "launch",
+    action: "launch.failed",
+    detail: input.summary,
+    payload: {
+      launchRunId: input.launchRunId,
+      ...(input.metadata ?? {}),
+    },
+  });
+}
+
+export function createDeployRunRecord(input: {
+  projectId: string;
+  deployProfileId: string;
+  summary: string;
+  logPath: string;
+  metadata?: Record<string, unknown>;
+}) {
+  const db = getDb();
+  const runId = randomUUID();
+  const timestamp = nowIso();
+
+  db.prepare(
+    `
+      INSERT INTO deploy_runs (
+        id, project_id, deploy_profile_id, status, summary, log_path, metadata_json, started_at, completed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+  ).run(
+    runId,
+    input.projectId,
+    input.deployProfileId,
+    "running",
+    input.summary,
+    input.logPath,
+    serialise(input.metadata ?? {}),
+    timestamp,
+    null,
+  );
+
+  setProjectLifecycleStage(input.projectId, "deploy_running");
+  appendAuditEvent({
+    projectId: input.projectId,
+    actor: "deploy",
+    action: "deploy.started",
+    detail: input.summary,
+    payload: {
+      deployRunId: runId,
+      deployProfileId: input.deployProfileId,
+      logPath: input.logPath,
+      ...input.metadata,
+    },
+  });
+
+  return runId;
+}
+
+export function completeDeployRunRecord(input: {
+  deployRunId: string;
+  projectId: string;
+  summary: string;
+  metadata?: Record<string, unknown>;
+}) {
+  const db = getDb();
+  const timestamp = nowIso();
+
+  db.prepare(
+    `
+      UPDATE deploy_runs
+      SET status = 'completed', summary = ?, metadata_json = ?, completed_at = ?
+      WHERE id = ?
+    `,
+  ).run(input.summary, serialise(input.metadata ?? {}), timestamp, input.deployRunId);
+
+  setProjectLifecycleStage(input.projectId, "deployed");
+  appendAuditEvent({
+    projectId: input.projectId,
+    actor: "deploy",
+    action: "deploy.completed",
+    detail: input.summary,
+    payload: {
+      deployRunId: input.deployRunId,
+      ...(input.metadata ?? {}),
+    },
+  });
+}
+
+export function failDeployRunRecord(input: {
+  deployRunId: string;
+  projectId: string;
+  summary: string;
+  metadata?: Record<string, unknown>;
+}) {
+  const db = getDb();
+  const timestamp = nowIso();
+
+  db.prepare(
+    `
+      UPDATE deploy_runs
+      SET status = 'failed', summary = ?, metadata_json = ?, completed_at = ?
+      WHERE id = ?
+    `,
+  ).run(input.summary, serialise(input.metadata ?? {}), timestamp, input.deployRunId);
+
+  setProjectLifecycleStage(input.projectId, "failed");
+  appendAuditEvent({
+    projectId: input.projectId,
+    actor: "deploy",
+    action: "deploy.failed",
+    detail: input.summary,
+    payload: {
+      deployRunId: input.deployRunId,
+      ...(input.metadata ?? {}),
+    },
+  });
+}
+
+export function refreshOperationalProfiles(projectId: string) {
+  const db = getDb();
+  const projectRow = db
+    .prepare("SELECT * FROM projects WHERE id = ?")
+    .get(projectId) as Record<string, unknown> | undefined;
+
+  if (!projectRow) {
+    throw new Error("Project not found.");
+  }
+
+  const timestamp = nowIso();
+  const detected = detectOperationalProfiles(hydrateProject(projectRow));
+  const existingLaunch = db
+    .prepare("SELECT * FROM launch_profiles WHERE project_id = ?")
+    .all(projectId) as Array<Record<string, unknown>>;
+  const existingDeploy = db
+    .prepare("SELECT * FROM deploy_profiles WHERE project_id = ?")
+    .all(projectId) as Array<Record<string, unknown>>;
+  const launchKey = (profile: {
+    target: string;
+    label: string;
+    command: string;
+    cwd: string;
+  }) => `${profile.target}::${profile.label}::${profile.command}::${profile.cwd}`;
+  const deployKey = (profile: {
+    target: string;
+    label: string;
+    command: string;
+    cwd: string;
+  }) => `${profile.target}::${profile.label}::${profile.command}::${profile.cwd}`;
+  const launchByKey = new Map(
+    existingLaunch.map((row) => [
+      launchKey({
+        target: String(row.target),
+        label: String(row.label),
+        command: String(row.command),
+        cwd: String(row.cwd),
+      }),
+      row,
+    ]),
+  );
+  const deployByKey = new Map(
+    existingDeploy.map((row) => [
+      deployKey({
+        target: String(row.target),
+        label: String(row.label),
+        command: String(row.command),
+        cwd: String(row.cwd),
+      }),
+      row,
+    ]),
+  );
+  const upsertLaunch = db.prepare(
+    `
+      INSERT INTO launch_profiles (
+        id, project_id, target, label, command, cwd, healthcheck_url, metadata_json, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        target = excluded.target,
+        label = excluded.label,
+        command = excluded.command,
+        cwd = excluded.cwd,
+        healthcheck_url = excluded.healthcheck_url,
+        metadata_json = excluded.metadata_json,
+        updated_at = excluded.updated_at
+    `,
+  );
+  const upsertDeploy = db.prepare(
+    `
+      INSERT INTO deploy_profiles (
+        id, project_id, target, label, command, cwd, approval_required, metadata_json, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        target = excluded.target,
+        label = excluded.label,
+        command = excluded.command,
+        cwd = excluded.cwd,
+        approval_required = excluded.approval_required,
+        metadata_json = excluded.metadata_json,
+        updated_at = excluded.updated_at
+    `,
+  );
+  const deleteLaunch = db.prepare("DELETE FROM launch_profiles WHERE id = ?");
+  const deleteDeploy = db.prepare("DELETE FROM deploy_profiles WHERE id = ?");
+
+  db.transaction(() => {
+    const seenLaunchIds = new Set<string>();
+    const seenDeployIds = new Set<string>();
+
+    for (const profile of detected.launchProfiles) {
+      const existing = launchByKey.get(launchKey(profile));
+      const id = existing ? String(existing.id) : randomUUID();
+      const createdAt = existing ? String(existing.created_at) : timestamp;
+      seenLaunchIds.add(id);
+      upsertLaunch.run(
+        id,
+        projectId,
+        profile.target,
+        profile.label,
+        profile.command,
+        profile.cwd,
+        profile.healthcheckUrl,
+        serialise(profile.metadata),
+        createdAt,
+        timestamp,
+      );
+    }
+
+    for (const row of existingLaunch) {
+      const id = String(row.id);
+      if (!seenLaunchIds.has(id)) {
+        deleteLaunch.run(id);
+      }
+    }
+
+    for (const profile of detected.deployProfiles) {
+      const existing = deployByKey.get(deployKey(profile));
+      const id = existing ? String(existing.id) : randomUUID();
+      const createdAt = existing ? String(existing.created_at) : timestamp;
+      seenDeployIds.add(id);
+      upsertDeploy.run(
+        id,
+        projectId,
+        profile.target,
+        profile.label,
+        profile.command,
+        profile.cwd,
+        profile.approvalRequired ? 1 : 0,
+        serialise(profile.metadata),
+        createdAt,
+        timestamp,
+      );
+    }
+
+    for (const row of existingDeploy) {
+      const id = String(row.id);
+      if (!seenDeployIds.has(id)) {
+        deleteDeploy.run(id);
+      }
+    }
+  })();
+}
+
 export function advanceQueuedWorkItems(projectId: string) {
   const db = getDb();
   const workItems = hydrateProjectWorkItems(projectId);
@@ -772,6 +1936,7 @@ export function getProjectSnapshot(projectId: string): ProjectSnapshot | null {
   }
 
   const project = hydrateProject(projectRow);
+  refreshOperationalProfiles(projectId);
   settleProjectState(projectId);
   const specDocument = db
     .prepare(
@@ -806,6 +1971,43 @@ export function getProjectSnapshot(projectId: string): ProjectSnapshot | null {
     )
     .all(projectId)
     .map((row) => hydrateAudit(row as Record<string, unknown>));
+  const workshopThread = db
+    .prepare(
+      "SELECT * FROM workshop_threads WHERE project_id = ? ORDER BY updated_at DESC, created_at DESC, rowid DESC LIMIT 1",
+    )
+    .get(projectId) as Record<string, unknown> | undefined;
+  const workshopMessages = workshopThread
+    ? db
+        .prepare(
+          `
+            SELECT * FROM workshop_messages
+            WHERE project_id = ? AND workshop_thread_id = ?
+            ORDER BY created_at ASC
+          `,
+        )
+        .all(projectId, workshopThread.id)
+        .map((row) => hydrateWorkshopMessage(row as Record<string, unknown>))
+    : [];
+  const researchRuns = db
+    .prepare("SELECT * FROM research_runs WHERE project_id = ? ORDER BY started_at DESC")
+    .all(projectId)
+    .map((row) => hydrateResearchRun(row as Record<string, unknown>));
+  const launchProfiles = db
+    .prepare("SELECT * FROM launch_profiles WHERE project_id = ? ORDER BY target ASC, label ASC")
+    .all(projectId)
+    .map((row) => hydrateLaunchProfile(row as Record<string, unknown>));
+  const launchRuns = db
+    .prepare("SELECT * FROM launch_runs WHERE project_id = ? ORDER BY started_at DESC")
+    .all(projectId)
+    .map((row) => hydrateLaunchRun(row as Record<string, unknown>));
+  const deployProfiles = db
+    .prepare("SELECT * FROM deploy_profiles WHERE project_id = ? ORDER BY target ASC, label ASC")
+    .all(projectId)
+    .map((row) => hydrateDeployProfile(row as Record<string, unknown>));
+  const deployRuns = db
+    .prepare("SELECT * FROM deploy_runs WHERE project_id = ? ORDER BY started_at DESC")
+    .all(projectId)
+    .map((row) => hydrateDeployRun(row as Record<string, unknown>));
   const gateStatus = recomputeGateStatuses(projectId);
   const counts = countWorkItems(workItems);
   const currentMilestone = computeCurrentMilestone(workItems);
@@ -847,6 +2049,13 @@ export function getProjectSnapshot(projectId: string): ProjectSnapshot | null {
     failingGates,
     trackerIssues: listTrackerIssuesForProject(project.slug),
     symphony: null,
+    workshopThread: workshopThread ? hydrateWorkshopThread(workshopThread) : null,
+    workshopMessages,
+    researchRuns,
+    launchProfiles,
+    launchRuns,
+    deployProfiles,
+    deployRuns,
   };
 }
 
@@ -898,6 +2107,7 @@ export function updateProjectSettings(
       | "name"
       | "repoSource"
       | "executionMode"
+      | "researchProvider"
       | "plannerModel"
       | "executionModel"
       | "plannerReasoningEffort"
@@ -933,6 +2143,9 @@ export function updateProjectSettings(
   const nextExecutionMode = normalizeExecutionMode(
     updates.executionMode ?? current.executionMode,
   );
+  const nextResearchProvider = normalizeResearchProvider(
+    updates.researchProvider ?? current.researchProvider,
+  );
   const nextPlannerModel = sanitizeOptionalModel(
     updates.plannerModel ?? current.plannerModel,
   );
@@ -962,6 +2175,7 @@ export function updateProjectSettings(
         name = ?,
         repo_source = ?,
         execution_mode = ?,
+        research_provider = ?,
         planner_model = ?,
         execution_model = ?,
         planner_reasoning_effort = ?,
@@ -986,6 +2200,7 @@ export function updateProjectSettings(
       normalizedName,
       nextRepoSource,
       nextExecutionMode,
+      nextResearchProvider,
       nextPlannerModel,
       nextExecutionModel,
       nextPlannerReasoningEffort,
@@ -1047,6 +2262,7 @@ export function updateProjectSettings(
       nextName: normalizedName,
       repoSource: nextRepoSource,
       executionMode: nextExecutionMode,
+      researchProvider: nextResearchProvider,
       plannerModel: nextPlannerModel,
       executionModel: nextExecutionModel,
       plannerReasoningEffort: nextPlannerReasoningEffort,
@@ -1061,57 +2277,48 @@ export function updateProjectSettings(
   );
 }
 
-export async function createProjectFromSpec(input: CreateProjectInput) {
+async function ingestProjectPlan(input: {
+  projectId: string;
+  slug: string;
+  name: string;
+  executionMode: ProjectRecord["executionMode"];
+  plannerModel: string | null;
+  executionModel: string | null;
+  plannerReasoningEffort: ProjectRecord["plannerReasoningEffort"];
+  executionReasoningEffort: ProjectRecord["executionReasoningEffort"];
+  symphonyMaxConcurrentAgents: number;
+  symphonyMaxTurns: number;
+  repoSource: string;
+  specText: string;
+  specFilename: string;
+  planLabel: string;
+  lifecycleStage?: ProjectLifecycleStage;
+}) {
   const db = getDb();
-  const appSettings = getAppSettings();
-  const projectId = randomUUID();
+  const existingPlan = db
+    .prepare("SELECT id FROM plan_versions WHERE project_id = ? LIMIT 1")
+    .get(input.projectId);
+
+  if (existingPlan) {
+    throw new Error("This project already has an ingested plan.");
+  }
+
   const specDocumentId = randomUUID();
   const planVersionId = randomUUID();
   const timestamp = nowIso();
-  const repoSource = normalizeRepoSource(input.repoSource);
-  const slugBase = slugify(input.name) || `project-${projectId.slice(0, 8)}`;
-  let slug = slugBase;
-  let counter = 2;
-
-  while (db.prepare("SELECT id FROM projects WHERE slug = ?").get(slug)) {
-    slug = `${slugBase}-${counter++}`;
-  }
-
-  const policyProfile = {
-    ...DEFAULT_POLICY_PROFILE,
-    ...input.policyProfile,
-    deploymentTargets:
-      input.policyProfile?.deploymentTargets ?? DEFAULT_POLICY_PROFILE.deploymentTargets,
-  };
-  const plannerModel =
-    input.plannerModel === undefined
-      ? appSettings.plannerModel
-      : input.plannerModel?.trim() || null;
-  const executionModel =
-    input.executionModel === undefined
-      ? appSettings.executionModel
-      : input.executionModel?.trim() || null;
-  const plannerReasoningEffort =
-    input.plannerReasoningEffort ?? appSettings.plannerReasoningEffort;
-  const executionReasoningEffort =
-    input.executionReasoningEffort ?? appSettings.executionReasoningEffort;
-  const symphonyMaxConcurrentAgents =
-    input.symphonyMaxConcurrentAgents ?? appSettings.symphonyMaxConcurrentAgents;
-  const symphonyMaxTurns = input.symphonyMaxTurns ?? appSettings.symphonyMaxTurns;
-
   const specIr = await buildSpecIrWithLlm({
     name: input.name,
     executionMode: input.executionMode,
     specText: input.specText,
-    plannerModel,
-    plannerReasoningEffort,
+    plannerModel: input.plannerModel,
+    plannerReasoningEffort: input.plannerReasoningEffort,
   });
   const plan = generatePlanFromSpec(specIr);
   const generatedIdMap = new Map(
     plan.workItems.map((workItem) => [workItem.id, randomUUID()]),
   );
-  const projectRoot = getProjectRoot(slug);
-  const workspaceRoot = getProjectWorkspaceRoot(slug);
+  const projectRoot = getProjectRoot(input.slug);
+  const workspaceRoot = getProjectWorkspaceRoot(input.slug);
   const contentHash = getContentHash(input.specText);
 
   mkdirSync(projectRoot, { recursive: true });
@@ -1125,12 +2332,12 @@ export async function createProjectFromSpec(input: CreateProjectInput) {
       "",
       `Project: ${input.name}`,
       `Execution mode: ${input.executionMode}`,
-      `Planner model: ${plannerModel ?? "Codex default"}`,
-      `Execution model: ${executionModel ?? "Codex default"}`,
-      `Planning thinking level: ${plannerReasoningEffort}`,
-      `Agent thinking level: ${executionReasoningEffort}`,
-      `Symphony parallel agents: ${symphonyMaxConcurrentAgents}`,
-      `Symphony max turns: ${symphonyMaxTurns}`,
+      `Planner model: ${input.plannerModel ?? "Codex default"}`,
+      `Execution model: ${input.executionModel ?? "Codex default"}`,
+      `Planning thinking level: ${input.plannerReasoningEffort}`,
+      `Agent thinking level: ${input.executionReasoningEffort}`,
+      `Symphony parallel agents: ${input.symphonyMaxConcurrentAgents}`,
+      `Symphony max turns: ${input.symphonyMaxTurns}`,
       "",
       "Rules:",
       "- Closure is blocked until QA, security, and deployment gates pass.",
@@ -1143,55 +2350,24 @@ export async function createProjectFromSpec(input: CreateProjectInput) {
   db.transaction(() => {
     db.prepare(
       `
-        INSERT INTO projects (
-          id, slug, name, repo_source, execution_mode, planner_model, execution_model, planner_reasoning_effort, execution_reasoning_effort, symphony_max_concurrent_agents, symphony_max_turns, status, health, qa_strictness, security_strictness, deployment_targets_json, cumulative_input_tokens, cumulative_output_tokens, cumulative_total_tokens, created_at, updated_at, last_activity_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `,
-    ).run(
-      projectId,
-      slug,
-      input.name,
-      repoSource,
-      input.executionMode,
-      plannerModel,
-      executionModel,
-      plannerReasoningEffort,
-      executionReasoningEffort,
-      symphonyMaxConcurrentAgents,
-      symphonyMaxTurns,
-      "planned",
-      "on_track",
-      policyProfile.qaStrictness,
-      policyProfile.securityStrictness,
-      serialise(policyProfile.deploymentTargets),
-      0,
-      0,
-      0,
-      timestamp,
-      timestamp,
-      timestamp,
-    );
-
-    db.prepare(
-      `
         INSERT INTO spec_documents (
           id, project_id, filename, content_hash, metadata_json, content, created_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?)
       `,
     ).run(
       specDocumentId,
-      projectId,
+      input.projectId,
       input.specFilename,
       contentHash,
       serialise({
-        repoSource,
+        repoSource: input.repoSource,
         outline: specIr.outline,
-        plannerModel,
-        executionModel,
-        plannerReasoningEffort,
-        executionReasoningEffort,
-        symphonyMaxConcurrentAgents,
-        symphonyMaxTurns,
+        plannerModel: input.plannerModel,
+        executionModel: input.executionModel,
+        plannerReasoningEffort: input.plannerReasoningEffort,
+        executionReasoningEffort: input.executionReasoningEffort,
+        symphonyMaxConcurrentAgents: input.symphonyMaxConcurrentAgents,
+        symphonyMaxTurns: input.symphonyMaxTurns,
       }),
       input.specText,
       timestamp,
@@ -1205,9 +2381,9 @@ export async function createProjectFromSpec(input: CreateProjectInput) {
       `,
     ).run(
       planVersionId,
-      projectId,
+      input.projectId,
       specDocumentId,
-      "Initial imported plan",
+      input.planLabel,
       "approved",
       serialise({
         summary: specIr.summary,
@@ -1228,7 +2404,7 @@ export async function createProjectFromSpec(input: CreateProjectInput) {
     for (const workItem of plan.workItems) {
       insertWorkItem.run(
         generatedIdMap.get(workItem.id),
-        projectId,
+        input.projectId,
         planVersionId,
         workItem.parentId ? generatedIdMap.get(workItem.parentId) : null,
         workItem.key,
@@ -1256,17 +2432,31 @@ export async function createProjectFromSpec(input: CreateProjectInput) {
     for (const edge of plan.dependencyEdges) {
       insertDependency.run(
         randomUUID(),
-        projectId,
+        input.projectId,
         generatedIdMap.get(edge.fromWorkItemId),
         generatedIdMap.get(edge.toWorkItemId),
         edge.kind,
       );
     }
+
+    db.prepare(
+      `
+        UPDATE projects
+        SET lifecycle_stage = ?, status = ?, updated_at = ?, last_activity_at = ?
+        WHERE id = ?
+      `,
+    ).run(
+      input.lifecycleStage ?? "plan_ingested",
+      input.lifecycleStage ?? "plan_ingested",
+      timestamp,
+      timestamp,
+      input.projectId,
+    );
   })();
 
   writeArtifact({
-    projectId,
-    projectSlug: slug,
+    projectId: input.projectId,
+    projectSlug: input.slug,
     kind: "spec",
     label: "Ingested source spec",
     extension: "md",
@@ -1279,8 +2469,8 @@ export async function createProjectFromSpec(input: CreateProjectInput) {
   });
 
   writeArtifact({
-    projectId,
-    projectSlug: slug,
+    projectId: input.projectId,
+    projectSlug: input.slug,
     kind: "plan-review",
     label: "Plan review synthesis",
     extension: "md",
@@ -1303,43 +2493,153 @@ export async function createProjectFromSpec(input: CreateProjectInput) {
       "## Workflow roots",
       `- Workspace root: ${workspaceRoot}`,
       `- Workflow contract: ${workflowPath}`,
-      `- Planner model: ${plannerModel ?? "Codex default"}`,
-      `- Execution model: ${executionModel ?? "Codex default"}`,
-      `- Planning thinking level: ${plannerReasoningEffort}`,
-      `- Agent thinking level: ${executionReasoningEffort}`,
-      `- Symphony parallel agents: ${symphonyMaxConcurrentAgents}`,
-      `- Symphony max turns: ${symphonyMaxTurns}`,
+      `- Planner model: ${input.plannerModel ?? "Codex default"}`,
+      `- Execution model: ${input.executionModel ?? "Codex default"}`,
+      `- Planning thinking level: ${input.plannerReasoningEffort}`,
+      `- Agent thinking level: ${input.executionReasoningEffort}`,
+      `- Symphony parallel agents: ${input.symphonyMaxConcurrentAgents}`,
+      `- Symphony max turns: ${input.symphonyMaxTurns}`,
     ].join("\n"),
     metadata: {
       workflowPath,
-      plannerModel,
-      executionModel,
+      plannerModel: input.plannerModel,
+      executionModel: input.executionModel,
     },
+  });
+
+  appendAuditEvent({
+    projectId: input.projectId,
+    actor: "system",
+    action: "plan.ingested",
+    detail: `Ingested ${input.specFilename} into ${input.name}.`,
+    payload: {
+      specDocumentId,
+      planVersionId,
+      slug: input.slug,
+      plannerModel: input.plannerModel,
+      executionModel: input.executionModel,
+      plannerReasoningEffort: input.plannerReasoningEffort,
+      executionReasoningEffort: input.executionReasoningEffort,
+    },
+  });
+
+  refreshOperationalProfiles(input.projectId);
+  settleProjectState(input.projectId);
+
+  return {
+    planVersionId,
+    specDocumentId,
+  };
+}
+
+export async function ingestApprovedPlan(input: {
+  projectId: string;
+  specText: string;
+  specFilename?: string;
+  planLabel?: string;
+}) {
+  const snapshot = getProjectSnapshot(input.projectId);
+
+  if (!snapshot) {
+    throw new Error("Project not found.");
+  }
+
+  const result = await ingestProjectPlan({
+    projectId: snapshot.project.id,
+    slug: snapshot.project.slug,
+    name: snapshot.project.name,
+    executionMode: snapshot.project.executionMode,
+    plannerModel: snapshot.project.plannerModel,
+    executionModel: snapshot.project.executionModel,
+    plannerReasoningEffort: snapshot.project.plannerReasoningEffort,
+    executionReasoningEffort: snapshot.project.executionReasoningEffort,
+    symphonyMaxConcurrentAgents: snapshot.project.symphonyMaxConcurrentAgents,
+    symphonyMaxTurns: snapshot.project.symphonyMaxTurns,
+    repoSource: snapshot.project.repoSource,
+    specText: input.specText,
+    specFilename: input.specFilename ?? "plan.md",
+    planLabel: input.planLabel ?? "Approved research plan",
+    lifecycleStage: "execution_ready",
+  });
+
+  return {
+    projectId: snapshot.project.id,
+    slug: snapshot.project.slug,
+    ...result,
+  };
+}
+
+export async function createProjectFromSpec(input: CreateProjectInput) {
+  const db = getDb();
+  const appSettings = getAppSettings();
+  const timestamp = nowIso();
+  const projectId = randomUUID();
+  const slug = nextProjectSlug(db, input.name, projectId);
+  const defaults = resolveProjectDefaults(input, appSettings);
+  const policyProfile = {
+    ...DEFAULT_POLICY_PROFILE,
+    ...input.policyProfile,
+    deploymentTargets:
+      input.policyProfile?.deploymentTargets ?? DEFAULT_POLICY_PROFILE.deploymentTargets,
+  };
+
+  insertProjectRecord({
+    id: projectId,
+    slug,
+    name: input.name.trim(),
+    repoSource: defaults.repoSource,
+    executionMode: input.executionMode,
+    lifecycleStage: "draft",
+    researchProvider: defaults.researchProvider,
+    plannerModel: defaults.plannerModel,
+    executionModel: defaults.executionModel,
+    plannerReasoningEffort: defaults.plannerReasoningEffort,
+    executionReasoningEffort: defaults.executionReasoningEffort,
+    qaStrictness: policyProfile.qaStrictness,
+    securityStrictness: policyProfile.securityStrictness,
+    deploymentTargets: policyProfile.deploymentTargets,
+    symphonyMaxConcurrentAgents: defaults.symphonyMaxConcurrentAgents,
+    symphonyMaxTurns: defaults.symphonyMaxTurns,
+    timestamp,
+  });
+
+  const result = await ingestProjectPlan({
+    projectId,
+    slug,
+    name: input.name.trim(),
+    executionMode: input.executionMode,
+    plannerModel: defaults.plannerModel,
+    executionModel: defaults.executionModel,
+    plannerReasoningEffort: defaults.plannerReasoningEffort,
+    executionReasoningEffort: defaults.executionReasoningEffort,
+    symphonyMaxConcurrentAgents: defaults.symphonyMaxConcurrentAgents,
+    symphonyMaxTurns: defaults.symphonyMaxTurns,
+    repoSource: defaults.repoSource,
+    specText: input.specText,
+    specFilename: input.specFilename,
+    planLabel: "Initial imported plan",
+    lifecycleStage: "execution_ready",
   });
 
   appendAuditEvent({
     projectId,
     actor: "system",
     action: "project.created",
-    detail: `Created project ${input.name} and generated the initial plan version.`,
+    detail: `Created project ${input.name.trim()} and generated the initial plan version.`,
     payload: {
-      specDocumentId,
-      planVersionId,
       slug,
-      plannerModel,
-      executionModel,
-      plannerReasoningEffort,
-      executionReasoningEffort,
+      ...result,
+      plannerModel: defaults.plannerModel,
+      executionModel: defaults.executionModel,
+      plannerReasoningEffort: defaults.plannerReasoningEffort,
+      executionReasoningEffort: defaults.executionReasoningEffort,
     },
   });
-
-  settleProjectState(projectId);
 
   return {
     projectId,
     slug,
-    planVersionId,
-    specDocumentId,
+    ...result,
   };
 }
 

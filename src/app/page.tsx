@@ -37,38 +37,41 @@ export default function HomePage() {
             </div>
             <div className="space-y-4">
               <h1 className="holo-text max-w-4xl text-balance text-5xl font-semibold leading-tight text-[var(--color-ink)] lg:text-6xl">
-                Paste your plan. Overture turns it into a guided project run.
+                Start from a finished plan or let Overture build one with you.
               </h1>
               <p className="max-w-3xl text-lg leading-8 text-[var(--color-muted)]">
                 You do not need to create tickets, coordinate agents, or remember the testing
-                steps. Overture reads the plan, organizes the work, and gives you a simple place
-                to start, monitor, and review the run.
+                steps. Overture can take a finished `plan.md`, or start from rough notes and walk
+                you through workshop, research, plan review, execution, launch, and deploy.
               </p>
             </div>
 
             <div className="grid gap-4 md:grid-cols-3">
               <div className="rounded-[26px] border border-white/8 bg-white/4 p-5">
                 <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--color-accent)]">
-                  1. Add your plan
+                  Guided path
                 </p>
                 <p className="mt-3 text-sm leading-7 text-[var(--color-muted)]">
-                  Paste markdown or upload a file. Messy research notes are okay.
+                  Start from notes, goals, or raw research. Overture opens the Prompt Workshop and
+                  creates the plan for you.
                 </p>
               </div>
               <div className="rounded-[26px] border border-white/8 bg-white/4 p-5">
                 <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--color-accent)]">
-                  2. Review the draft
+                  Quick path
                 </p>
                 <p className="mt-3 text-sm leading-7 text-[var(--color-muted)]">
-                  Overture turns the plan into milestones, tasks, and checklists you can read.
+                  Already have `plan.md`? Paste it in and Overture skips straight to plan
+                  ingestion and execution review.
                 </p>
               </div>
               <div className="rounded-[26px] border border-white/8 bg-white/4 p-5">
                 <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--color-accent)]">
-                  3. Start the run
+                  After approval
                 </p>
                 <p className="mt-3 text-sm leading-7 text-[var(--color-muted)]">
-                  Start the automated run and follow progress, results, and final evidence.
+                  Symphony execution, local launch, deployment runs, and the evidence trail all
+                  stay in one place.
                 </p>
               </div>
             </div>
@@ -130,6 +133,14 @@ export default function HomePage() {
               </div>
               <div className="rounded-[24px] border border-white/8 bg-white/4 p-4">
                 <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--color-muted)]">
+                  Research provider
+                </p>
+                <p className="mt-2 text-base text-[var(--color-ink)]">
+                  {appSettings.defaultResearchProvider}
+                </p>
+              </div>
+              <div className="rounded-[24px] border border-white/8 bg-white/4 p-4">
+                <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--color-muted)]">
                   Default run mode
                 </p>
                 <p className="mt-2 text-base text-[var(--color-ink)]">
@@ -161,7 +172,7 @@ export default function HomePage() {
                 <Sparkles className="h-4 w-4" />
               </Link>
               <span className="text-sm text-[var(--color-muted)]">
-                Settings control the default models, thinking levels, and run mode.
+                Settings control the research provider, models, thinking levels, and run mode.
               </span>
             </div>
           </div>

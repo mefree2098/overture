@@ -17,21 +17,20 @@ Overture can be packaged for Jetson as an `arm64` container, and the image now i
 
 ## Suggested deployment flow
 
-1. Build an ARM64 image: `docker buildx build --platform linux/arm64 -t overture:jetson .`
-2. Copy `.env` to the device and set at least `PORT` and `OVERTURE_BIND_HOST=0.0.0.0`.
-3. Mount persistent state into `/app/.overture` and mount the device auth directory into `/codex-host`.
-4. Start the app:
+1. On the build machine, set `OVERTURE_REMOTE_HOST` to the Jetson SSH target.
+2. Optionally set:
+   - `OVERTURE_REMOTE_PORT`
+   - `OVERTURE_REMOTE_RUNTIME_DIR`
+   - `OVERTURE_REMOTE_ENV_FILE`
+   - `OVERTURE_REMOTE_CODEX_DIR`
+3. Run:
 
 ```bash
-docker run --rm -p 3000:3000 \
-  --env-file .env \
-  -v "$(pwd)/.overture:/app/.overture" \
-  -v "$HOME/.codex:/codex-host:ro" \
-  overture:jetson
+OVERTURE_REMOTE_HOST=jetson@my-device.local bash deploy.sh jetson
 ```
-5. Verify `GET /api/health`.
-6. Open `/settings` if you want to change planner or execution model defaults, or the planning / agent thinking levels.
-7. Seed or create a project, then launch Symphony with `npm run runner -- <project-id>`.
+4. Verify `GET /api/health` on the device.
+5. Open `/settings` if you want to change planner or execution model defaults, the research provider, or the planning / agent thinking levels.
+6. Create a project through the guided pipeline or the quick-path plan intake, then launch Symphony from the UI.
 
 ## What remains manual on real hardware
 
@@ -42,5 +41,5 @@ docker run --rm -p 3000:3000 \
 ## Operational notes
 
 - Project deletion is supported from the UI and `DELETE /api/projects/:projectId`; it removes SQLite records and project runtime folders.
-- Docker bind mounting `.overture` keeps Jetson runtime data visible to host-side troubleshooting and backup workflows.
+- The deploy helper transfers the image over SSH and runs the container with persistent `.overture` state on the device.
 - If you intentionally want `hosted_api` mode on Jetson, you can still extend the environment with `OPENAI_API_KEY`, but that is no longer the documented default path.

@@ -2,16 +2,19 @@
 
 import { CodexReasoningSelect } from "@/components/codex-reasoning-select";
 import { CodexModelSelect } from "@/components/codex-model-select";
+import { ResearchProviderSelect } from "@/components/research-provider-select";
 import Link from "next/link";
 import { startTransition, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  BrainCircuit,
   ChevronDown,
   FileText,
   LoaderCircle,
   Rocket,
   Settings2,
   Sparkles,
+  Wand2,
 } from "lucide-react";
 import type { CodexModelOption } from "@/lib/model-catalog";
 import { getCodexReasoningEffortOptions } from "@/lib/codex-reasoning";
@@ -20,6 +23,8 @@ import type {
   AppSettingsRecord,
   CodexReasoningEffort,
   ExecutionMode,
+  ResearchProvider,
+  WorkshopSearchMode,
 } from "@/lib/types";
 
 const STARTER_TEMPLATE = `# Project plan
@@ -36,6 +41,8 @@ Describe what you want built or improved.
 ## Notes
 Paste any research notes, requirements, risks, or ideas here.`;
 
+type CreatePath = "guided" | "quick";
+
 function modeIsAvailable(
   mode: ExecutionMode,
   executionSupport: {
@@ -50,6 +57,17 @@ function modeIsAvailable(
 
 function modeLabel(mode: ExecutionMode) {
   return mode === "local_chatgpt" ? "Local ChatGPT Codex" : "Hosted API Codex";
+}
+
+function searchModeLabel(mode: WorkshopSearchMode) {
+  switch (mode) {
+    case "live":
+      return "Live search";
+    case "provider_fallback":
+      return "Provider fallback";
+    default:
+      return "Cached search";
+  }
 }
 
 export function ProjectCreateForm({
@@ -76,10 +94,14 @@ export function ProjectCreateForm({
     return executionSupport.recommendedExecutionMode;
   }, [appSettings.defaultExecutionMode, executionSupport]);
   const [name, setName] = useState("");
+  const [createPath, setCreatePath] = useState<CreatePath>("guided");
   const [repoSource, setRepoSource] = useState(
     appSettings.defaultRepoSource || process.env.NEXT_PUBLIC_DEFAULT_REPO || ".",
   );
   const [executionMode, setExecutionMode] = useState<ExecutionMode>(initialExecutionMode);
+  const [researchProvider, setResearchProvider] = useState<ResearchProvider>(
+    appSettings.defaultResearchProvider,
+  );
   const [qaStrictness, setQaStrictness] = useState(appSettings.defaultQaStrictness);
   const [securityStrictness, setSecurityStrictness] = useState(
     appSettings.defaultSecurityStrictness,
@@ -94,6 +116,9 @@ export function ProjectCreateForm({
     appSettings.symphonyMaxConcurrentAgents,
   );
   const [symphonyMaxTurns, setSymphonyMaxTurns] = useState(appSettings.symphonyMaxTurns);
+  const [workshopKickoff, setWorkshopKickoff] = useState("");
+  const [workshopSearchMode, setWorkshopSearchMode] =
+    useState<WorkshopSearchMode>("cached");
   const [specFilename, setSpecFilename] = useState("plan.md");
   const [specText, setSpecText] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -155,6 +180,9 @@ export function ProjectCreateForm({
             name,
             repoSource,
             executionMode,
+            sourceBriefText: specText.trim() || null,
+            sourceBriefFilename: specText.trim() ? specFilename : null,
+            researchProvider,
             plannerModel: plannerModel.trim() || null,
             executionModel: executionModel.trim() || null,
             plannerReasoningEffort,
@@ -187,6 +215,80 @@ export function ProjectCreateForm({
     });
   }
 
+  function handleGuidedSubmit() {
+    setSubmitting(true);
+    setError(null);
+
+    startTransition(async () => {
+      try {
+        const response = await fetch("/api/projects/drafts", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            name,
+            repoSource,
+            executionMode,
+            researchProvider,
+            plannerModel: plannerModel.trim() || null,
+            executionModel: executionModel.trim() || null,
+            plannerReasoningEffort,
+            executionReasoningEffort,
+            symphonyMaxConcurrentAgents,
+            symphonyMaxTurns,
+          }),
+        });
+
+        const data = (await response.json()) as { projectId?: string; error?: string };
+        if (!response.ok || !data.projectId) {
+          throw new Error(data.error ?? "Failed to create guided project.");
+        }
+
+        const kickoffMessage =
+          workshopKickoff.trim() ||
+          (specText.trim()
+            ? "Use the source brief attached to this project to draft the first research-ready prompt, summary, and research objectives. Ask no follow-up questions unless critical information is missing."
+            : "");
+
+        if (kickoffMessage) {
+          const workshopResponse = await fetch(`/api/projects/${data.projectId}/workshop`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              message: kickoffMessage,
+              searchMode: workshopSearchMode,
+              repoContext: repoSource,
+            }),
+          });
+          const workshopPayload = (await workshopResponse.json().catch(() => ({}))) as {
+            error?: string;
+          };
+
+          if (!workshopResponse.ok) {
+            throw new Error(
+              workshopPayload.error ??
+                "The draft project was created, but the first workshop turn failed.",
+            );
+          }
+        }
+
+        router.push(`/projects/${data.projectId}/workshop`);
+        router.refresh();
+      } catch (submitError) {
+        setError(
+          submitError instanceof Error
+            ? submitError.message
+            : "Failed to create guided project.",
+        );
+      } finally {
+        setSubmitting(false);
+      }
+    });
+  }
+
   return (
     <section className="panel halo-ring rounded-[36px] border p-6 lg:p-8">
       <div className="grid gap-8 xl:grid-cols-[1.04fr_0.96fr]">
@@ -196,48 +298,70 @@ export function ProjectCreateForm({
               Start a new project
             </span>
             <h2 className="text-balance text-4xl font-semibold text-[var(--color-ink)] lg:text-5xl">
-              Start with just a name and your plan.
+              Choose the fast lane or let Overture build the plan with you.
             </h2>
             <p className="max-w-3xl text-base leading-8 text-[var(--color-muted)]">
-              Overture will read the document, build the task list, and set up the automated run
-              for you. You only need to fill in the basics here.
+              If you already have a finished `plan.md`, use the quick path. If you only have notes,
+              goals, or messy research, start the guided flow and Overture will help shape the
+              research prompt first.
             </p>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-3">
-            <div className="rounded-[24px] border border-white/8 bg-white/4 p-5">
-              <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--color-accent)]">
-                Step 1
+          <div className="grid gap-4 md:grid-cols-2">
+            <button
+              type="button"
+              onClick={() => setCreatePath("guided")}
+              className={`rounded-[24px] border p-5 text-left transition ${
+                createPath === "guided"
+                  ? "border-[var(--color-accent)] bg-[var(--color-accent-soft)]"
+                  : "border-white/8 bg-white/4 hover:border-[var(--color-accent)]"
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <div className="grid h-10 w-10 place-items-center rounded-[16px] border border-white/10 bg-white/8">
+                  <Wand2 className="h-4 w-4 text-[var(--color-accent)]" />
+                </div>
+                <div>
+                  <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--color-accent)]">
+                    Guided flow
+                  </p>
+                  <p className="mt-1 text-base font-semibold text-[var(--color-ink)]">
+                    Start from notes, goals, or rough ideas
+                  </p>
+                </div>
+              </div>
+              <p className="mt-3 text-sm leading-6 text-[var(--color-muted)]">
+                Overture opens a Prompt Workshop, runs deep research, lets you review the generated
+                plan, then hands it into the existing execution system.
               </p>
-              <p className="mt-3 text-base font-semibold text-[var(--color-ink)]">
-                Name the project
+            </button>
+            <button
+              type="button"
+              onClick={() => setCreatePath("quick")}
+              className={`rounded-[24px] border p-5 text-left transition ${
+                createPath === "quick"
+                  ? "border-[var(--color-accent)] bg-[var(--color-accent-soft)]"
+                  : "border-white/8 bg-white/4 hover:border-[var(--color-accent)]"
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <div className="grid h-10 w-10 place-items-center rounded-[16px] border border-white/10 bg-white/8">
+                  <BrainCircuit className="h-4 w-4 text-[var(--color-accent)]" />
+                </div>
+                <div>
+                  <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--color-accent)]">
+                    Quick path
+                  </p>
+                  <p className="mt-1 text-base font-semibold text-[var(--color-ink)]">
+                    I already have a finished plan
+                  </p>
+                </div>
+              </div>
+              <p className="mt-3 text-sm leading-6 text-[var(--color-muted)]">
+                Upload or paste `plan.md`, skip the workshop and research stages, and go straight
+                to Overture’s existing planner and execution review flow.
               </p>
-              <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">
-                Pick a clear name you will recognize later.
-              </p>
-            </div>
-            <div className="rounded-[24px] border border-white/8 bg-white/4 p-5">
-              <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--color-accent)]">
-                Step 2
-              </p>
-              <p className="mt-3 text-base font-semibold text-[var(--color-ink)]">
-                Paste the plan
-              </p>
-              <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">
-                Upload the markdown file or paste the text directly.
-              </p>
-            </div>
-            <div className="rounded-[24px] border border-white/8 bg-white/4 p-5">
-              <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--color-accent)]">
-                Step 3
-              </p>
-              <p className="mt-3 text-base font-semibold text-[var(--color-ink)]">
-                Review and start
-              </p>
-              <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">
-                Overture creates the project page and you choose when to start the run.
-              </p>
-            </div>
+            </button>
           </div>
 
           <label className="space-y-2">
@@ -265,57 +389,88 @@ export function ProjectCreateForm({
             in <span className="font-semibold text-[var(--color-ink)]">Advanced project options</span>.
           </div>
 
-          <div className="space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p className="text-sm font-semibold text-[var(--color-ink)]">
-                  Step 2: add your markdown plan
-                </p>
-                <p className="text-sm leading-6 text-[var(--color-muted)]">
-                  Paste the plan directly or upload a `.md` file. You do not need to clean up
-                  citations or make it look perfect first.
-                </p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
+          {createPath === "guided" ? (
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-[var(--color-ink)]">
+                    Step 2: tell Overture what you want
+                  </p>
+                  <p className="text-sm leading-6 text-[var(--color-muted)]">
+                    Paste your notes, goals, constraints, links, or messy research. The Prompt
+                    Workshop will ask follow-up questions and build a proper research prompt with
+                    you.
+                  </p>
+                </div>
                 <span className="rounded-full border border-[var(--color-border)] bg-white/6 px-4 py-2 font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--color-muted)]">
-                  {specFilename}
+                  {searchModeLabel(workshopSearchMode)}
                 </span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSpecFilename("starter-plan.md");
-                    setSpecText(STARTER_TEMPLATE);
-                  }}
-                  className="rounded-full border border-[var(--color-border)] bg-white/6 px-4 py-2 text-sm font-semibold text-[var(--color-muted)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-ink)]"
-                >
-                  Use starter outline
-                </button>
-                <label className="glass-button inline-flex cursor-pointer items-center gap-2 rounded-full px-4 py-2 text-sm transition">
-                  <FileText className="h-4 w-4" />
-                  Upload file
-                  <input
-                    type="file"
-                    accept=".md,.txt,.markdown"
-                    className="hidden"
-                    onChange={(event) => {
-                      void handleFileChange(event.target.files?.[0]);
-                    }}
-                  />
-                </label>
               </div>
+              <textarea
+                aria-label="Workshop kickoff notes"
+                value={workshopKickoff}
+                onChange={(event) => setWorkshopKickoff(event.target.value)}
+                placeholder={`What should Overture research and build?\n\nExample:\n- Build a writer-first character simulation platform for authors\n- Start with a web product\n- Make memory inspectable and canon-first\n- Include launch and deploy guidance for local, Docker, and iOS later`}
+                className="glass-input fine-scrollbar min-h-[280px] w-full rounded-[30px] px-4 py-4 text-sm leading-7"
+              />
+              <p className="text-sm text-[var(--color-muted)]">
+                Overture will save a draft project first, then open the Prompt Workshop so you can
+                refine the research prompt before any plan is ingested.
+              </p>
             </div>
-            <textarea
-              aria-label="Plan content"
-              value={specText}
-              onChange={(event) => setSpecText(event.target.value)}
-              placeholder={`# Your project plan\n\n## Goal\nDescribe the product or outcome.\n\n## Major sections\nAdd the main areas, milestones, requirements, risks, or research notes.\n\n## Notes\nMessy research notes are okay. Overture will organize them.`}
-              className="glass-input fine-scrollbar min-h-[300px] w-full rounded-[30px] px-4 py-4 text-sm leading-7"
-            />
-            <p className="text-sm text-[var(--color-muted)]">
-              Tip: deep research plans, rough notes, and long markdown documents are all valid
-              inputs here.
-            </p>
-          </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-[var(--color-ink)]">
+                    Step 2: add your markdown plan
+                  </p>
+                  <p className="text-sm leading-6 text-[var(--color-muted)]">
+                    Paste the plan directly or upload a `.md` file. You do not need to clean up
+                    citations or make it look perfect first.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-full border border-[var(--color-border)] bg-white/6 px-4 py-2 font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--color-muted)]">
+                    {specFilename}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSpecFilename("starter-plan.md");
+                      setSpecText(STARTER_TEMPLATE);
+                    }}
+                    className="rounded-full border border-[var(--color-border)] bg-white/6 px-4 py-2 text-sm font-semibold text-[var(--color-muted)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-ink)]"
+                  >
+                    Use starter outline
+                  </button>
+                  <label className="glass-button inline-flex cursor-pointer items-center gap-2 rounded-full px-4 py-2 text-sm transition">
+                    <FileText className="h-4 w-4" />
+                    Upload file
+                    <input
+                      type="file"
+                      accept=".md,.txt,.markdown"
+                      className="hidden"
+                      onChange={(event) => {
+                        void handleFileChange(event.target.files?.[0]);
+                      }}
+                    />
+                  </label>
+                </div>
+              </div>
+              <textarea
+                aria-label="Plan content"
+                value={specText}
+                onChange={(event) => setSpecText(event.target.value)}
+                placeholder={`# Your project plan\n\n## Goal\nDescribe the product or outcome.\n\n## Major sections\nAdd the main areas, milestones, requirements, risks, or research notes.\n\n## Notes\nMessy research notes are okay. Overture will organize them.`}
+                className="glass-input fine-scrollbar min-h-[300px] w-full rounded-[30px] px-4 py-4 text-sm leading-7"
+              />
+              <p className="text-sm text-[var(--color-muted)]">
+                Tip: deep research plans, rough notes, and long markdown documents are all valid
+                inputs here.
+              </p>
+            </div>
+          )}
 
           <details className="rounded-[28px] border border-white/8 bg-white/4 p-5">
             <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-base font-semibold text-[var(--color-ink)]">
@@ -335,6 +490,21 @@ export function ProjectCreateForm({
                   value={repoSource}
                   onChange={(event) => setRepoSource(event.target.value)}
                   className="glass-input w-full rounded-[22px] px-4 py-3"
+                />
+              </label>
+
+              <label className="space-y-2">
+                <span className="text-sm font-semibold text-[var(--color-ink)]">
+                  Research provider
+                </span>
+                <p className="text-sm leading-6 text-[var(--color-muted)]">
+                  Guided projects use this provider when Overture runs the deep research stage.
+                </p>
+                <ResearchProviderSelect
+                  id="project-research-provider"
+                  name="researchProvider"
+                  value={researchProvider}
+                  onChange={setResearchProvider}
                 />
               </label>
 
@@ -364,6 +534,29 @@ export function ProjectCreateForm({
                   </option>
                 </select>
               </label>
+
+              {createPath === "guided" ? (
+                <label className="space-y-2">
+                  <span className="text-sm font-semibold text-[var(--color-ink)]">
+                    Workshop search mode
+                  </span>
+                  <p className="text-sm leading-6 text-[var(--color-muted)]">
+                    Choose whether the Prompt Workshop should stay on cached search, use live
+                    search, or fall back to other configured providers.
+                  </p>
+                  <select
+                    value={workshopSearchMode}
+                    onChange={(event) =>
+                      setWorkshopSearchMode(event.target.value as WorkshopSearchMode)
+                    }
+                    className="glass-input w-full rounded-[22px] px-4 py-3"
+                  >
+                    <option value="cached">Cached search</option>
+                    <option value="live">Live search</option>
+                    <option value="provider_fallback">Provider fallback</option>
+                  </select>
+                </label>
+              ) : null}
 
               <label className="space-y-2">
                 <span className="text-sm font-semibold text-[var(--color-ink)]">
@@ -503,13 +696,13 @@ export function ProjectCreateForm({
               disabled={
                 submitting ||
                 !name.trim() ||
-                !specText.trim() ||
                 !executionSupport.codexCliAvailable ||
                 (executionMode === "local_chatgpt" &&
                   !executionSupport.localChatgptAvailable) ||
-                (executionMode === "hosted_api" && !executionSupport.hostedApiAvailable)
+                (executionMode === "hosted_api" && !executionSupport.hostedApiAvailable) ||
+                (createPath === "quick" && !specText.trim())
               }
-              onClick={handleSubmit}
+              onClick={createPath === "guided" ? handleGuidedSubmit : handleSubmit}
               className="glass-button inline-flex items-center gap-2 rounded-full px-6 py-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60"
             >
               {submitting ? (
@@ -517,10 +710,18 @@ export function ProjectCreateForm({
               ) : (
                 <Rocket className="h-4 w-4" />
               )}
-              {submitting ? "Creating your project..." : "Turn this plan into a project"}
+              {submitting
+                ? createPath === "guided"
+                  ? "Creating guided project..."
+                  : "Creating your project..."
+                : createPath === "guided"
+                  ? "Start guided project"
+                  : "Turn this plan into a project"}
             </button>
             <p className="text-sm text-[var(--color-muted)]">
-              Most plans take about 20 to 60 seconds to organize into milestones and tasks.
+              {createPath === "guided"
+                ? "The guided path creates a draft project first, then opens the Prompt Workshop so you can shape the research prompt."
+                : "Most plans take about 20 to 60 seconds to organize into milestones and tasks."}
             </p>
           </div>
 
@@ -545,24 +746,33 @@ export function ProjectCreateForm({
 
             <div className="mt-5 space-y-3 text-sm leading-7 text-[var(--color-muted)]">
               <div className="rounded-[22px] border border-white/8 bg-white/4 p-4">
-                <p className="font-semibold text-[var(--color-ink)]">1. Planning</p>
+                <p className="font-semibold text-[var(--color-ink)]">
+                  {createPath === "guided" ? "1. Prompt workshop" : "1. Planning"}
+                </p>
                 <p className="mt-2">
-                  Codex reads your plan and turns it into milestones, tasks, risks, and quality
-                  gates.
+                  {createPath === "guided"
+                    ? "Codex App Server helps refine your rough notes into a canonical deep-research prompt."
+                    : "Codex reads your plan and turns it into milestones, tasks, risks, and quality gates."}
                 </p>
               </div>
               <div className="rounded-[22px] border border-white/8 bg-white/4 p-4">
-                <p className="font-semibold text-[var(--color-ink)]">2. Review</p>
+                <p className="font-semibold text-[var(--color-ink)]">
+                  {createPath === "guided" ? "2. Deep research" : "2. Review"}
+                </p>
                 <p className="mt-2">
-                  Overture creates a project page where you can review the generated work before
-                  starting anything.
+                  {createPath === "guided"
+                    ? "Overture runs research, writes `research-report.md` and `plan.md`, and keeps the artifacts visible."
+                    : "Overture creates a project page where you can review the generated work before starting anything."}
                 </p>
               </div>
               <div className="rounded-[22px] border border-white/8 bg-white/4 p-4">
-                <p className="font-semibold text-[var(--color-ink)]">3. Automated run</p>
+                <p className="font-semibold text-[var(--color-ink)]">
+                  {createPath === "guided" ? "3. Plan review and run" : "3. Automated run"}
+                </p>
                 <p className="mt-2">
-                  When you start the run, Symphony works through the queue while Overture keeps the
-                  progress, evidence, and final checks organized.
+                  {createPath === "guided"
+                    ? "You approve the generated plan, then Symphony executes it while Overture manages launch, deploy, and evidence."
+                    : "When you start the run, Symphony works through the queue while Overture keeps the progress, evidence, and final checks organized."}
                 </p>
               </div>
             </div>
@@ -600,19 +810,53 @@ export function ProjectCreateForm({
                 <p className="font-semibold text-[var(--color-ink)]">Default mode</p>
                 <p className="mt-2">{modeLabel(initialExecutionMode)}</p>
               </div>
+              <div className="rounded-[22px] border border-white/8 bg-white/4 p-4">
+                <p className="font-semibold text-[var(--color-ink)]">Research provider</p>
+                <p className="mt-2">{appSettings.defaultResearchProvider}</p>
+              </div>
             </div>
           </div>
 
           <div className="panel rounded-[30px] p-6">
             <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--color-muted)]">
-              Plan preview
+              {createPath === "guided" ? "Guided flow preview" : "Plan preview"}
             </p>
             <p className="mt-2 text-sm text-[var(--color-muted)]">
-              As you paste text, Overture previews the main headings it can see in the document.
+              {createPath === "guided"
+                ? "This is what happens after you create a guided project."
+                : "As you paste text, Overture previews the main headings it can see in the document."}
             </p>
 
             <div className="mt-4 space-y-3">
-              {outline.length ? (
+              {createPath === "guided" ? (
+                <>
+                  <div className="rounded-[20px] border border-white/8 bg-white/4 px-4 py-3">
+                    <p className="text-sm text-[var(--color-ink)]">1. Prompt Workshop</p>
+                    <p className="mt-1 text-xs leading-6 text-[var(--color-muted)]">
+                      Threaded Codex conversation with a live prompt draft.
+                    </p>
+                  </div>
+                  <div className="rounded-[20px] border border-white/8 bg-white/4 px-4 py-3">
+                    <p className="text-sm text-[var(--color-ink)]">2. Deep Research Run</p>
+                    <p className="mt-1 text-xs leading-6 text-[var(--color-muted)]">
+                      Generates `research-report.md`, `plan.md`, citations, and open questions.
+                    </p>
+                  </div>
+                  <div className="rounded-[20px] border border-white/8 bg-white/4 px-4 py-3">
+                    <p className="text-sm text-[var(--color-ink)]">3. Plan Review</p>
+                    <p className="mt-1 text-xs leading-6 text-[var(--color-muted)]">
+                      You edit or approve the generated plan before ingestion.
+                    </p>
+                  </div>
+                  <div className="rounded-[20px] border border-white/8 bg-white/4 px-4 py-3">
+                    <p className="text-sm text-[var(--color-ink)]">4. Build, Launch, Deploy</p>
+                    <p className="mt-1 text-xs leading-6 text-[var(--color-muted)]">
+                      Overture hands the approved plan to Symphony, then manages launch and deploy
+                      profiles with artifacts.
+                    </p>
+                  </div>
+                </>
+              ) : outline.length ? (
                 outline.slice(0, 8).map((node, index) => (
                   <div
                     key={`${node.title}-${index}`}

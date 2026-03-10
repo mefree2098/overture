@@ -38,14 +38,13 @@ fi
 if [ -n "${OPENAI_API_KEY:-}" ]; then
   AUTH_TEMP_FILE="$(mktemp)"
   printf '%s\n' "$OPENAI_API_KEY" > "$AUTH_TEMP_FILE"
-  chown node:node "$AUTH_TEMP_FILE" 2>/dev/null || true
-  su -p node -s /bin/sh -c "cat '$AUTH_TEMP_FILE' | codex login --with-api-key >/dev/null"
+  cat "$AUTH_TEMP_FILE" | codex login --with-api-key >/dev/null
   rm -f "$AUTH_TEMP_FILE"
 fi
 
-if ! su -p node -s /bin/sh -c "codex login status >/dev/null 2>&1"; then
+if ! codex login status >/dev/null 2>&1; then
   echo "Codex is not authenticated. Provide host ChatGPT Codex auth or OPENAI_API_KEY before starting the container." >&2
   exit 1
 fi
 
-exec su -p node -s /bin/sh -c "exec node .next/standalone/server.js"
+exec node .next/standalone/server.js

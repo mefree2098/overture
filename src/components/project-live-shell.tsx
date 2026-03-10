@@ -23,6 +23,7 @@ import { PlanWorkbench } from "@/components/plan-workbench";
 import { StatusPill } from "@/components/status-pill";
 import { getCodexReasoningEffortOptions } from "@/lib/codex-reasoning";
 import { getCodexModelOptions } from "@/lib/model-catalog";
+import { researchProviderLabel } from "@/lib/project-pipeline";
 import { addTokenUsage, parseTokenUsage } from "@/lib/token-usage";
 import type {
   ArtifactRecord,
@@ -923,6 +924,20 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
                         ? "Restart automated run"
                         : "Start automated run"}
                 </button>
+                <Link
+                  href={`/projects/${snapshot.project.id}/launch`}
+                  className="inline-flex items-center gap-2 rounded-full border border-[var(--color-border)] bg-white/6 px-5 py-3 text-sm font-semibold text-[var(--color-muted)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-ink)]"
+                >
+                  <Rocket className="h-4 w-4" />
+                  Launch locally
+                </Link>
+                <Link
+                  href={`/projects/${snapshot.project.id}/deploy`}
+                  className="inline-flex items-center gap-2 rounded-full border border-[var(--color-border)] bg-white/6 px-5 py-3 text-sm font-semibold text-[var(--color-muted)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-ink)]"
+                >
+                  <ExternalLink className="h-4 w-4" />
+                  Deploy targets
+                </Link>
               </div>
               {runError ? <p className="mt-3 text-sm text-[var(--color-danger)]">{runError}</p> : null}
               {!runError && stoppedRuntime && lastStartFailed ? (
@@ -971,6 +986,12 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
                   {renameError ? (
                     <p className="mt-3 text-sm text-[var(--color-danger)]">{renameError}</p>
                   ) : null}
+                </div>
+                <div className="rounded-[22px] border border-white/8 bg-white/4 p-4">
+                  <p className="font-semibold text-[var(--color-ink)]">Research provider</p>
+                  <p className="mt-2 text-sm text-[var(--color-muted)]">
+                    {researchProviderLabel(snapshot.project.researchProvider)}
+                  </p>
                 </div>
                 <div className="rounded-[22px] border border-white/8 bg-white/4 p-4">
                   <p className="font-semibold text-[var(--color-ink)]">Planning model</p>

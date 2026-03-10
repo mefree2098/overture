@@ -1,5 +1,6 @@
 import { DEFAULT_APP_SETTINGS } from "@/lib/constants";
 import { normalizeCodexReasoningEffort } from "@/lib/codex-reasoning";
+import { normalizeResearchProvider } from "@/lib/project-pipeline";
 import { getDb } from "@/lib/server/db";
 import type { AppSettingsRecord, ExecutionMode } from "@/lib/types";
 
@@ -31,6 +32,9 @@ function hydrateSettings(row: Record<string, unknown>): AppSettingsRecord {
     ),
     executionReasoningEffort: normalizeCodexReasoningEffort(
       row.execution_reasoning_effort as string | null | undefined,
+    ),
+    defaultResearchProvider: normalizeResearchProvider(
+      row.default_research_provider as string | null | undefined,
     ),
     defaultExecutionMode: normalizeExecutionMode(
       row.default_execution_mode as string | null | undefined,
@@ -87,6 +91,7 @@ function ensureRow() {
         execution_model,
         planner_reasoning_effort,
         execution_reasoning_effort,
+        default_research_provider,
         default_execution_mode,
         default_repo_source,
         default_qa_strictness,
@@ -95,7 +100,7 @@ function ensureRow() {
         symphony_max_turns,
         created_at,
         updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
   ).run(
     SETTINGS_ROW_ID,
@@ -103,6 +108,7 @@ function ensureRow() {
     DEFAULT_APP_SETTINGS.executionModel,
     DEFAULT_APP_SETTINGS.plannerReasoningEffort,
     DEFAULT_APP_SETTINGS.executionReasoningEffort,
+    DEFAULT_APP_SETTINGS.defaultResearchProvider,
     DEFAULT_APP_SETTINGS.defaultExecutionMode,
     DEFAULT_APP_SETTINGS.defaultRepoSource,
     DEFAULT_APP_SETTINGS.defaultQaStrictness,
@@ -140,6 +146,9 @@ export function updateAppSettings(
     ),
     executionReasoningEffort: normalizeCodexReasoningEffort(
       updates.executionReasoningEffort ?? current.executionReasoningEffort,
+    ),
+    defaultResearchProvider: normalizeResearchProvider(
+      updates.defaultResearchProvider ?? current.defaultResearchProvider,
     ),
     defaultExecutionMode: normalizeExecutionMode(
       updates.defaultExecutionMode ?? current.defaultExecutionMode,
@@ -179,6 +188,7 @@ export function updateAppSettings(
         execution_model = ?,
         planner_reasoning_effort = ?,
         execution_reasoning_effort = ?,
+        default_research_provider = ?,
         default_execution_mode = ?,
         default_repo_source = ?,
         default_qa_strictness = ?,
@@ -193,6 +203,7 @@ export function updateAppSettings(
     next.executionModel,
     next.plannerReasoningEffort,
     next.executionReasoningEffort,
+    next.defaultResearchProvider,
     next.defaultExecutionMode,
     next.defaultRepoSource,
     next.defaultQaStrictness,

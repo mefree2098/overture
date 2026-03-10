@@ -1,5 +1,6 @@
 services:
   overture:
+    user: "0:0"
     build:
       context: .
       dockerfile: Dockerfile
@@ -21,6 +22,9 @@ services:
       - overture_data:/app/.overture/data
       - overture_workspaces:/app/.overture/workspaces
       - ${OVERTURE_CODEX_AUTH_SOURCE_DIR:-${HOME}/.codex}:/codex-host:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
 volumes:
   overture_data:

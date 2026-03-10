@@ -6,6 +6,9 @@ import type {
   FINDING_SEVERITIES,
   FINDING_STATUSES,
   GATE_NAMES,
+  LAUNCH_TARGETS,
+  PROJECT_LIFECYCLE_STAGES,
+  RESEARCH_PROVIDERS,
   RUN_PHASES,
   TRACKER_STATE_NAMES,
   WORK_ITEM_STATUSES,
@@ -20,10 +23,14 @@ export type FindingSeverity = (typeof FINDING_SEVERITIES)[number];
 export type FindingStatus = (typeof FINDING_STATUSES)[number];
 export type RunPhase = (typeof RUN_PHASES)[number];
 export type DeploymentTarget = (typeof DEPLOYMENT_TARGETS)[number];
+export type ProjectLifecycleStage = (typeof PROJECT_LIFECYCLE_STAGES)[number];
+export type ResearchProvider = (typeof RESEARCH_PROVIDERS)[number];
+export type LaunchTarget = (typeof LAUNCH_TARGETS)[number];
 export type TrackerStateName = (typeof TRACKER_STATE_NAMES)[number];
 export type ExecutionMode = "local_chatgpt" | "hosted_api";
 export type GateVerdict = "pass" | "fail" | "pending" | "waived" | "partial";
 export type CodexReasoningEffort = (typeof CODEX_REASONING_EFFORTS)[number];
+export type WorkshopSearchMode = "cached" | "live" | "provider_fallback";
 
 export interface PolicyProfile {
   qaStrictness: number;
@@ -109,6 +116,8 @@ export interface ProjectRecord {
   name: string;
   repoSource: string;
   executionMode: ExecutionMode;
+  lifecycleStage: ProjectLifecycleStage;
+  researchProvider: ResearchProvider;
   plannerModel: string | null;
   executionModel: string | null;
   plannerReasoningEffort: CodexReasoningEffort;
@@ -276,6 +285,98 @@ export interface SymphonyRuntimeRecord {
   bootstrapTail: string[];
 }
 
+export interface WorkshopThreadRecord {
+  id: string;
+  projectId: string;
+  codexThreadId: string;
+  title: string | null;
+  status: "active" | "archived";
+  searchMode: WorkshopSearchMode;
+  promptDraft: string;
+  summary: string;
+  repoContext: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorkshopMessageRecord {
+  id: string;
+  projectId: string;
+  workshopThreadId: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface ResearchRunRecord {
+  id: string;
+  projectId: string;
+  provider: ResearchProvider;
+  status: "queued" | "running" | "completed" | "failed";
+  searchMode: WorkshopSearchMode;
+  promptArtifactId: string | null;
+  reportArtifactId: string | null;
+  planArtifactId: string | null;
+  citationsArtifactId: string | null;
+  summaryArtifactId: string | null;
+  summary: string;
+  metadata: Record<string, unknown>;
+  startedAt: string;
+  completedAt: string | null;
+}
+
+export interface LaunchProfileRecord {
+  id: string;
+  projectId: string;
+  target: LaunchTarget;
+  label: string;
+  command: string;
+  cwd: string;
+  healthcheckUrl: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LaunchRunRecord {
+  id: string;
+  projectId: string;
+  launchProfileId: string;
+  status: "queued" | "running" | "completed" | "failed";
+  summary: string;
+  logPath: string;
+  metadata: Record<string, unknown>;
+  startedAt: string;
+  completedAt: string | null;
+}
+
+export interface DeployProfileRecord {
+  id: string;
+  projectId: string;
+  target: DeploymentTarget;
+  label: string;
+  command: string;
+  cwd: string;
+  approvalRequired: boolean;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DeployRunRecord {
+  id: string;
+  projectId: string;
+  deployProfileId: string;
+  status: "queued" | "running" | "completed" | "failed";
+  summary: string;
+  logPath: string;
+  metadata: Record<string, unknown>;
+  startedAt: string;
+  completedAt: string | null;
+}
+
 export interface ProjectSummary {
   project: ProjectRecord;
   gateStatus: GateStatusRecord;
@@ -295,6 +396,13 @@ export interface ProjectSnapshot extends ProjectSummary {
   auditEvents: AuditEventRecord[];
   trackerIssues: TrackerIssue[];
   symphony: SymphonyRuntimeRecord | null;
+  workshopThread: WorkshopThreadRecord | null;
+  workshopMessages: WorkshopMessageRecord[];
+  researchRuns: ResearchRunRecord[];
+  launchProfiles: LaunchProfileRecord[];
+  launchRuns: LaunchRunRecord[];
+  deployProfiles: DeployProfileRecord[];
+  deployRuns: DeployRunRecord[];
 }
 
 export interface CreateProjectInput {
@@ -302,6 +410,7 @@ export interface CreateProjectInput {
   repoSource: string;
   executionMode: ExecutionMode;
   policyProfile?: Partial<typeof DEFAULT_POLICY_PROFILE>;
+  researchProvider?: ResearchProvider;
   plannerModel?: string | null;
   executionModel?: string | null;
   plannerReasoningEffort?: CodexReasoningEffort;
@@ -312,11 +421,27 @@ export interface CreateProjectInput {
   specFilename: string;
 }
 
+export interface CreateDraftProjectInput {
+  name: string;
+  repoSource: string;
+  executionMode: ExecutionMode;
+  sourceBriefText?: string | null;
+  sourceBriefFilename?: string | null;
+  plannerModel?: string | null;
+  executionModel?: string | null;
+  plannerReasoningEffort?: CodexReasoningEffort;
+  executionReasoningEffort?: CodexReasoningEffort;
+  researchProvider?: ResearchProvider;
+  symphonyMaxConcurrentAgents?: number;
+  symphonyMaxTurns?: number;
+}
+
 export interface AppSettingsRecord {
   plannerModel: string | null;
   executionModel: string | null;
   plannerReasoningEffort: CodexReasoningEffort;
   executionReasoningEffort: CodexReasoningEffort;
+  defaultResearchProvider: ResearchProvider;
   defaultExecutionMode: ExecutionMode;
   defaultRepoSource: string;
   defaultQaStrictness: number;

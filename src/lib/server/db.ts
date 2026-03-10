@@ -37,6 +37,8 @@ function runMigrations(db: Database.Database) {
       name TEXT NOT NULL,
       repo_source TEXT NOT NULL,
       execution_mode TEXT NOT NULL,
+      lifecycle_stage TEXT NOT NULL DEFAULT 'plan_ingested',
+      research_provider TEXT NOT NULL DEFAULT 'codex_native',
       planner_model TEXT,
       execution_model TEXT,
       planner_reasoning_effort TEXT NOT NULL DEFAULT 'low',
@@ -62,6 +64,7 @@ function runMigrations(db: Database.Database) {
       execution_model TEXT,
       planner_reasoning_effort TEXT NOT NULL,
       execution_reasoning_effort TEXT NOT NULL,
+      default_research_provider TEXT NOT NULL DEFAULT 'codex_native',
       default_execution_mode TEXT NOT NULL,
       default_repo_source TEXT NOT NULL,
       default_qa_strictness INTEGER NOT NULL,
@@ -163,6 +166,113 @@ function runMigrations(db: Database.Database) {
       FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE SET NULL
     );
 
+    CREATE TABLE IF NOT EXISTS workshop_threads (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      codex_thread_id TEXT NOT NULL,
+      title TEXT,
+      status TEXT NOT NULL,
+      search_mode TEXT NOT NULL,
+      prompt_draft TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      repo_context TEXT,
+      metadata_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS workshop_messages (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      workshop_thread_id TEXT NOT NULL,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      metadata_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (workshop_thread_id) REFERENCES workshop_threads(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS research_runs (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      status TEXT NOT NULL,
+      search_mode TEXT NOT NULL,
+      prompt_artifact_id TEXT,
+      report_artifact_id TEXT,
+      plan_artifact_id TEXT,
+      citations_artifact_id TEXT,
+      summary_artifact_id TEXT,
+      summary TEXT NOT NULL,
+      metadata_json TEXT NOT NULL,
+      started_at TEXT NOT NULL,
+      completed_at TEXT,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (prompt_artifact_id) REFERENCES artifacts(id) ON DELETE SET NULL,
+      FOREIGN KEY (report_artifact_id) REFERENCES artifacts(id) ON DELETE SET NULL,
+      FOREIGN KEY (plan_artifact_id) REFERENCES artifacts(id) ON DELETE SET NULL,
+      FOREIGN KEY (citations_artifact_id) REFERENCES artifacts(id) ON DELETE SET NULL,
+      FOREIGN KEY (summary_artifact_id) REFERENCES artifacts(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS launch_profiles (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      target TEXT NOT NULL,
+      label TEXT NOT NULL,
+      command TEXT NOT NULL,
+      cwd TEXT NOT NULL,
+      healthcheck_url TEXT,
+      metadata_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS launch_runs (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      launch_profile_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      log_path TEXT NOT NULL,
+      metadata_json TEXT NOT NULL,
+      started_at TEXT NOT NULL,
+      completed_at TEXT,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (launch_profile_id) REFERENCES launch_profiles(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS deploy_profiles (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      target TEXT NOT NULL,
+      label TEXT NOT NULL,
+      command TEXT NOT NULL,
+      cwd TEXT NOT NULL,
+      approval_required INTEGER NOT NULL DEFAULT 1,
+      metadata_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS deploy_runs (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      deploy_profile_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      log_path TEXT NOT NULL,
+      metadata_json TEXT NOT NULL,
+      started_at TEXT NOT NULL,
+      completed_at TEXT,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (deploy_profile_id) REFERENCES deploy_profiles(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS findings (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL,
@@ -213,8 +323,27 @@ function runMigrations(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_artifacts_project_created ON artifacts(project_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_findings_project_category ON findings(project_id, category, severity);
     CREATE INDEX IF NOT EXISTS idx_audit_events_project_created ON audit_events(project_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_workshop_threads_project_updated ON workshop_threads(project_id, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_workshop_messages_thread_created ON workshop_messages(workshop_thread_id, created_at ASC);
+    CREATE INDEX IF NOT EXISTS idx_research_runs_project_started ON research_runs(project_id, started_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_launch_profiles_project_target ON launch_profiles(project_id, target);
+    CREATE INDEX IF NOT EXISTS idx_launch_runs_project_started ON launch_runs(project_id, started_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_deploy_profiles_project_target ON deploy_profiles(project_id, target);
+    CREATE INDEX IF NOT EXISTS idx_deploy_runs_project_started ON deploy_runs(project_id, started_at DESC);
   `);
 
+  ensureColumn(
+    db,
+    "projects",
+    "lifecycle_stage",
+    "TEXT NOT NULL DEFAULT 'plan_ingested'",
+  );
+  ensureColumn(
+    db,
+    "projects",
+    "research_provider",
+    "TEXT NOT NULL DEFAULT 'codex_native'",
+  );
   ensureColumn(db, "projects", "planner_model", "TEXT");
   ensureColumn(db, "projects", "execution_model", "TEXT");
   ensureColumn(
@@ -253,6 +382,12 @@ function runMigrations(db: Database.Database) {
     "projects",
     "cumulative_total_tokens",
     "INTEGER NOT NULL DEFAULT 0",
+  );
+  ensureColumn(
+    db,
+    "app_settings",
+    "default_research_provider",
+    "TEXT NOT NULL DEFAULT 'codex_native'",
   );
   ensureColumn(
     db,

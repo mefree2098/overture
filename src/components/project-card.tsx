@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowUpRight, FolderKanban, Trash2 } from "lucide-react";
 import { StatusPill } from "@/components/status-pill";
+import { lifecycleDisplayLabel } from "@/lib/project-pipeline";
+import { projectStagePath } from "@/lib/project-stage-path";
 import type { ProjectSummary } from "@/lib/types";
 import { formatRelativeTime } from "@/lib/utils";
 
@@ -12,6 +14,8 @@ export function ProjectCard({ summary }: { summary: ProjectSummary }) {
   const router = useRouter();
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const projectHref = projectStagePath(summary.project.id, summary.project.lifecycleStage);
 
   function handleDelete() {
     const confirmed = window.confirm(
@@ -63,11 +67,11 @@ export function ProjectCard({ summary }: { summary: ProjectSummary }) {
             </h3>
             <p className="max-w-[24rem] text-sm leading-6 text-[var(--color-muted)]">
               {summary.currentMilestone ??
-                "Project created and ready for review or launch."}
+                `${lifecycleDisplayLabel(summary.project.lifecycleStage)} stage in progress.`}
             </p>
           </div>
           <Link
-            href={`/projects/${summary.project.id}`}
+            href={projectHref}
             prefetch={false}
             className="inline-flex items-center justify-center rounded-full border border-white/8 bg-white/4 p-3 text-[var(--color-muted)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
             aria-label={`Open ${summary.project.name}`}
@@ -87,7 +91,7 @@ export function ProjectCard({ summary }: { summary: ProjectSummary }) {
             Current step
           </p>
           <p className="mt-2 text-base text-[var(--color-ink)]">
-            {summary.currentMilestone ?? "Ready to execute"}
+            {summary.currentMilestone ?? lifecycleDisplayLabel(summary.project.lifecycleStage)}
           </p>
         </div>
         <div className="rounded-[22px] border border-white/8 bg-white/4 p-4">
@@ -118,7 +122,7 @@ export function ProjectCard({ summary }: { summary: ProjectSummary }) {
 
       <div className="mt-6 flex flex-wrap items-center gap-3">
         <Link
-          href={`/projects/${summary.project.id}`}
+          href={projectHref}
           prefetch={false}
           className="glass-button inline-flex items-center gap-2 rounded-full px-5 py-3 text-sm font-semibold transition"
         >

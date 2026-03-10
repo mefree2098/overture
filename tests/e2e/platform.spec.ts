@@ -3,10 +3,13 @@ import { expect, test } from "@playwright/test";
 test("creates a project and loads the project dashboard", async ({ page }) => {
   await page.goto("/");
   await expect(
-    page.getByRole("heading", { name: /Start with just a name and your plan/i }),
+    page.getByRole("heading", {
+      name: /Choose the fast lane or let Overture build the plan with you/i,
+    }),
   ).toBeVisible();
 
   const projectName = `E2E Project ${Date.now()}`;
+  await page.getByRole("button", { name: /I already have a finished plan/i }).click();
   await page.getByLabel("Project name").fill(projectName);
   await page.getByLabel("Plan content").fill(`# Example blueprint
 
@@ -39,4 +42,19 @@ Milestone A: Platform skeleton
       return page.getByText(/Automated run is live/i).isVisible();
     })
     .toBeTruthy();
+});
+
+test("creates a guided draft project and lands in the workshop", async ({ page }) => {
+  await page.goto("/");
+  await expect(
+    page.getByRole("button", { name: /Start from notes, goals, or rough ideas/i }),
+  ).toBeVisible();
+
+  const projectName = `Guided Project ${Date.now()}`;
+  await page.getByLabel("Project name").fill(projectName);
+  await page.getByRole("button", { name: /Start guided project/i }).click();
+  await page.waitForURL(/\/projects\/.+\/workshop/);
+
+  await expect(page.getByRole("heading", { name: /Prompt Workshop/i })).toBeVisible();
+  await expect(page.getByText(/No workshop turns yet/i)).toBeVisible();
 });

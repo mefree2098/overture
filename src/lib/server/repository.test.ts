@@ -218,4 +218,131 @@ describe("repository lifecycle", () => {
       totalTokens: 0,
     });
   });
+
+  it("can fork a workshop thread into a resumable alternate prompt branch", async () => {
+    const repository = await import("@/lib/server/repository");
+
+    const created = repository.createDraftProject({
+      name: "Workshop Fork",
+      repoSource: ".",
+      executionMode: "local_chatgpt",
+    });
+
+    repository.recordWorkshopTurn({
+      projectId: created.projectId,
+      codexThreadId: "thread-original",
+      title: "Original workshop",
+      searchMode: "cached",
+      promptDraft: "Research the next phase of Overture.",
+      summary: "Focus on research, launch, and deploy.",
+      repoContext: ".",
+      userMessage: "Help me turn this into a research prompt.",
+      assistantMessage: "Here is a stronger prompt draft.",
+      readyForResearch: false,
+      openQuestions: ["Should launch include iOS simulator automation?"],
+    });
+
+    const originalThread = repository.getLatestWorkshopThread(created.projectId);
+    const forked = repository.createWorkshopFork(created.projectId);
+    const forkedThread = repository.getLatestWorkshopThread(created.projectId);
+
+    expect(originalThread?.codexThreadId).toBe("thread-original");
+    expect(forked.workshopThreadId).toBe(forkedThread?.id);
+    expect(forkedThread?.id).not.toBe(originalThread?.id);
+    expect(forkedThread?.codexThreadId).toBe("");
+    expect(forkedThread?.promptDraft).toBe(originalThread?.promptDraft);
+    expect(forkedThread?.summary).toBe(originalThread?.summary);
+    expect(forkedThread?.metadata.forkedFromWorkshopThreadId).toBe(originalThread?.id);
+  });
+
+  it("stores the guided source brief as an artifact on draft creation", async () => {
+    const repository = await import("@/lib/server/repository");
+
+    const created = repository.createDraftProject({
+      name: "Guided Source Brief",
+      repoSource: ".",
+      executionMode: "local_chatgpt",
+      sourceBriefFilename: "expansion-brief.md",
+      sourceBriefText: "# Expansion brief\n\nAdd a guided research and deploy pipeline.",
+    });
+
+    const snapshot = repository.getProjectSnapshot(created.projectId);
+    const sourceBrief = snapshot?.artifacts.find((artifact) => artifact.kind === "source-brief");
+
+    expect(sourceBrief?.label).toBe("expansion-brief.md");
+    expect(sourceBrief?.mimeType).toBe("text/markdown");
+  });
+
+  it("records research runs without writing non-work-item run ids into audit foreign keys", async () => {
+    const repository = await import("@/lib/server/repository");
+
+    const created = repository.createDraftProject({
+      name: "Research Audit Safety",
+      repoSource: ".",
+      executionMode: "local_chatgpt",
+    });
+
+    repository.recordWorkshopTurn({
+      projectId: created.projectId,
+      codexThreadId: "thread-research",
+      title: "Research workshop",
+      searchMode: "cached",
+      promptDraft: "Research the next phase of Overture and produce a plan.",
+      summary: "Ready for research.",
+      repoContext: ".",
+      userMessage: "Turn this into a research brief.",
+      assistantMessage: "This prompt is ready for research.",
+      readyForResearch: true,
+      openQuestions: [],
+    });
+
+    const locked = repository.lockWorkshopPrompt(created.projectId);
+    const researchRunId = repository.createResearchRunRecord({
+      projectId: created.projectId,
+      provider: "codex_native",
+      searchMode: "cached",
+      promptArtifactId: locked.promptArtifactId,
+    });
+
+    repository.completeResearchRunRecord({
+      researchRunId,
+      projectId: created.projectId,
+      summary: "Research completed.",
+    });
+
+    const snapshot = repository.getProjectSnapshot(created.projectId);
+    const startedEvent = snapshot?.auditEvents.find((event) => event.action === "research.started");
+    const completedEvent = snapshot?.auditEvents.find(
+      (event) => event.action === "research.completed",
+    );
+
+    expect(snapshot?.researchRuns).toHaveLength(1);
+    expect(snapshot?.researchRuns[0]?.id).toBe(researchRunId);
+    expect(startedEvent?.runId).toBeNull();
+    expect(startedEvent?.payload.researchRunId).toBe(researchRunId);
+    expect(completedEvent?.runId).toBeNull();
+    expect(completedEvent?.payload.researchRunId).toBe(researchRunId);
+  });
+
+  it("keeps launch and deploy profile ids stable across snapshot refreshes", async () => {
+    const repository = await import("@/lib/server/repository");
+
+    const created = await repository.createProjectFromSpec({
+      name: "Stable Profiles",
+      repoSource: ".",
+      executionMode: "local_chatgpt",
+      specFilename: "plan.md",
+      specText: "# Blueprint\n\n## Goal\nKeep operational profile ids stable across polling",
+    });
+
+    const first = repository.getProjectSnapshot(created.projectId);
+    const second = repository.getProjectSnapshot(created.projectId);
+
+    expect(first?.launchProfiles.map((profile) => profile.id)).toEqual(
+      second?.launchProfiles.map((profile) => profile.id),
+    );
+    expect(first?.deployProfiles.map((profile) => profile.id)).toEqual(
+      second?.deployProfiles.map((profile) => profile.id),
+    );
+  });
 });

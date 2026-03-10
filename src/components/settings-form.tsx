@@ -5,12 +5,18 @@ import {
   CodexReasoningSelect,
 } from "@/components/codex-reasoning-select";
 import { CodexModelSelect } from "@/components/codex-model-select";
+import { ResearchProviderSelect } from "@/components/research-provider-select";
 import {
   getCodexReasoningEffortOptions,
 } from "@/lib/codex-reasoning";
 import type { CodexModelOption } from "@/lib/model-catalog";
 import { CheckCircle2, LoaderCircle, Settings2, Sparkles } from "lucide-react";
-import type { AppSettingsRecord, CodexReasoningEffort, ExecutionMode } from "@/lib/types";
+import type {
+  AppSettingsRecord,
+  CodexReasoningEffort,
+  ExecutionMode,
+  ResearchProvider,
+} from "@/lib/types";
 
 function supportLabel(
   executionSupport: {
@@ -57,6 +63,9 @@ export function SettingsForm({
     useState<CodexReasoningEffort>(initialSettings.plannerReasoningEffort);
   const [executionReasoningEffort, setExecutionReasoningEffort] =
     useState<CodexReasoningEffort>(initialSettings.executionReasoningEffort);
+  const [defaultResearchProvider, setDefaultResearchProvider] = useState<ResearchProvider>(
+    initialSettings.defaultResearchProvider,
+  );
   const [defaultExecutionMode, setDefaultExecutionMode] = useState<ExecutionMode>(
     initialSettings.defaultExecutionMode,
   );
@@ -130,6 +139,7 @@ export function SettingsForm({
             executionModel: executionModel.trim() || null,
             plannerReasoningEffort,
             executionReasoningEffort,
+            defaultResearchProvider,
             defaultExecutionMode,
             defaultRepoSource,
             defaultQaStrictness,
@@ -239,6 +249,21 @@ export function SettingsForm({
                 value={executionReasoningEffort}
                 onChange={setExecutionReasoningEffort}
                 options={executionReasoningOptions}
+              />
+            </label>
+
+            <label className="space-y-2">
+              <span className="text-sm font-semibold text-[var(--color-ink)]">
+                Default research provider
+              </span>
+              <p className="text-sm leading-6 text-[var(--color-muted)]">
+                This decides which research engine Overture uses first during the guided pipeline.
+              </p>
+              <ResearchProviderSelect
+                id="default-research-provider"
+                name="defaultResearchProvider"
+                value={defaultResearchProvider}
+                onChange={setDefaultResearchProvider}
               />
             </label>
 

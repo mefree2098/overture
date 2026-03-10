@@ -2,7 +2,11 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
-import { appendAuditEvent, getProjectSnapshot } from "@/lib/server/repository";
+import {
+  appendAuditEvent,
+  getProjectSnapshot,
+  setProjectLifecycleStage,
+} from "@/lib/server/repository";
 import { getInternalControlPlaneOrigin } from "@/lib/server/runtime-config";
 import { startSymphonyForProject } from "@/lib/server/symphony-manager";
 
@@ -39,6 +43,7 @@ export async function POST(
         workflowPath: symphony.workflowPath,
       },
     });
+    setProjectLifecycleStage(projectId, "executing");
 
     return NextResponse.json({
       ok: true,

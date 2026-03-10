@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { z } from "zod";
+import { DEPLOYMENT_TARGETS } from "@/lib/constants";
 import { normalizeCodexReasoningEffort } from "@/lib/codex-reasoning";
 import { getWorkspaceRoot } from "@/lib/server/storage";
 import {
@@ -19,8 +20,6 @@ import type {
   SpecIR,
 } from "@/lib/types";
 
-const DEPLOYMENT_TARGETS = ["local", "jetson", "azure", "aws"] as const;
-
 const plannerOutputSchema = z.object({
   summary: z.string().min(40).max(1200),
   features: z.array(z.string().min(3)).max(40).default([]),
@@ -30,7 +29,7 @@ const plannerOutputSchema = z.object({
   constraints: z.array(z.string().min(3)).max(40).default([]),
   risks: z.array(z.string().min(3)).max(30).default([]),
   acceptanceCriteria: z.array(z.string().min(3)).max(40).default([]),
-  deploymentTargets: z.array(z.enum(DEPLOYMENT_TARGETS)).max(4).default([]),
+  deploymentTargets: z.array(z.enum(DEPLOYMENT_TARGETS)).max(7).default([]),
   milestones: z
     .array(
       z.object({
@@ -109,7 +108,7 @@ const plannerJsonSchema = {
     },
     deploymentTargets: {
       type: "array",
-      maxItems: 4,
+      maxItems: 7,
       items: {
         type: "string",
         enum: [...DEPLOYMENT_TARGETS],
