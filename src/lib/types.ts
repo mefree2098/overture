@@ -11,6 +11,7 @@ import type {
   WORK_ITEM_STATUSES,
   WORK_ITEM_TYPES,
 } from "@/lib/constants";
+import type { TokenUsage } from "@/lib/token-usage";
 
 export type GateName = (typeof GATE_NAMES)[number];
 export type WorkItemType = (typeof WORK_ITEM_TYPES)[number];
@@ -119,6 +120,7 @@ export interface ProjectRecord {
   qaStrictness: number;
   securityStrictness: number;
   deploymentTargets: DeploymentTarget[];
+  cumulativeTokenUsage: TokenUsage;
   createdAt: string;
   updatedAt: string;
   lastActivityAt: string;

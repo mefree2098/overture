@@ -17,15 +17,26 @@ import {
   ShieldCheck,
   Trash2,
 } from "lucide-react";
+import { CodexModelSelect } from "@/components/codex-model-select";
+import { CodexReasoningSelect } from "@/components/codex-reasoning-select";
 import { PlanWorkbench } from "@/components/plan-workbench";
 import { StatusPill } from "@/components/status-pill";
-import { codexReasoningEffortLabel } from "@/lib/codex-reasoning";
+import { getCodexReasoningEffortOptions } from "@/lib/codex-reasoning";
+import { getCodexModelOptions } from "@/lib/model-catalog";
+import { addTokenUsage, parseTokenUsage } from "@/lib/token-usage";
 import type {
   ArtifactRecord,
+  CodexReasoningEffort,
   GateVerdict,
+  ExecutionMode,
   ProjectSnapshot,
 } from "@/lib/types";
-import { formatDateTime, formatRelativeTime, stripAnsi } from "@/lib/utils";
+import {
+  formatDateTime,
+  formatRelativeTime,
+  rewriteSummaryForProjectName,
+  stripAnsi,
+} from "@/lib/utils";
 
 type ProjectTab = "overview" | "plan" | "runtime" | "evidence";
 
@@ -47,11 +58,6 @@ function asNumber(value: unknown) {
 
 function asString(value: unknown) {
   return typeof value === "string" ? value : "";
-}
-
-function totalTokens(value: unknown) {
-  const tokens = asRecord(value);
-  return asNumber(tokens?.total_tokens);
 }
 
 function isWaitingForSlot(item: Record<string, unknown>) {
@@ -379,6 +385,26 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
   const [nameDraft, setNameDraft] = useState(initialSnapshot.project.name);
   const [renameSaving, setRenameSaving] = useState(false);
   const [renameError, setRenameError] = useState<string | null>(null);
+  const [plannerModelDraft, setPlannerModelDraft] = useState(
+    initialSnapshot.project.plannerModel ?? "",
+  );
+  const [executionModelDraft, setExecutionModelDraft] = useState(
+    initialSnapshot.project.executionModel ?? "",
+  );
+  const [plannerReasoningDraft, setPlannerReasoningDraft] =
+    useState<CodexReasoningEffort>(initialSnapshot.project.plannerReasoningEffort);
+  const [executionReasoningDraft, setExecutionReasoningDraft] =
+    useState<CodexReasoningEffort>(initialSnapshot.project.executionReasoningEffort);
+  const [executionModeDraft, setExecutionModeDraft] = useState<ExecutionMode>(
+    initialSnapshot.project.executionMode,
+  );
+  const [maxAgentsDraft, setMaxAgentsDraft] = useState(
+    initialSnapshot.project.symphonyMaxConcurrentAgents,
+  );
+  const [maxTurnsDraft, setMaxTurnsDraft] = useState(initialSnapshot.project.symphonyMaxTurns);
+  const [projectSettingsSaving, setProjectSettingsSaving] = useState(false);
+  const [projectSettingsError, setProjectSettingsError] = useState<string | null>(null);
+  const [projectSettingsSaved, setProjectSettingsSaved] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
@@ -397,6 +423,31 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
   const symphonySessions = asArray(symphonyState?.running);
   const symphonyRetryQueue = asArray(symphonyState?.retrying);
   const codexTotals = asRecord(symphonyState?.codex_totals);
+  const liveRunTokenUsage = parseTokenUsage(codexTotals);
+  const projectTokenUsage = addTokenUsage(
+    snapshot.project.cumulativeTokenUsage,
+    liveRunTokenUsage,
+  );
+  const projectOverviewSummary = rewriteSummaryForProjectName(
+    snapshot.planVersion?.specIr.summary ?? "",
+    snapshot.project.name,
+  );
+  const modelOptions = getCodexModelOptions([
+    snapshot.project.plannerModel,
+    snapshot.project.executionModel,
+    plannerModelDraft,
+    executionModelDraft,
+  ]);
+  const plannerReasoningOptions = getCodexReasoningEffortOptions(plannerModelDraft);
+  const executionReasoningOptions = getCodexReasoningEffortOptions(executionModelDraft);
+  const projectSettingsChanged =
+    plannerModelDraft !== (snapshot.project.plannerModel ?? "") ||
+    executionModelDraft !== (snapshot.project.executionModel ?? "") ||
+    plannerReasoningDraft !== snapshot.project.plannerReasoningEffort ||
+    executionReasoningDraft !== snapshot.project.executionReasoningEffort ||
+    executionModeDraft !== snapshot.project.executionMode ||
+    maxAgentsDraft !== snapshot.project.symphonyMaxConcurrentAgents ||
+    maxTurnsDraft !== snapshot.project.symphonyMaxTurns;
   const waitingForSlotQueue = symphonyRetryQueue.filter(isWaitingForSlot);
   const retryProblemQueue = symphonyRetryQueue.filter((item) => !isWaitingForSlot(item));
   const sanitizedBootstrapLog = snapshot.symphony?.bootstrapTail
@@ -457,6 +508,52 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
   useEffect(() => {
     setNameDraft(snapshot.project.name);
   }, [snapshot.project.name]);
+
+  useEffect(() => {
+    setPlannerModelDraft(snapshot.project.plannerModel ?? "");
+    setExecutionModelDraft(snapshot.project.executionModel ?? "");
+    setPlannerReasoningDraft(snapshot.project.plannerReasoningEffort);
+    setExecutionReasoningDraft(snapshot.project.executionReasoningEffort);
+    setExecutionModeDraft(snapshot.project.executionMode);
+    setMaxAgentsDraft(snapshot.project.symphonyMaxConcurrentAgents);
+    setMaxTurnsDraft(snapshot.project.symphonyMaxTurns);
+  }, [
+    snapshot.project.executionMode,
+    snapshot.project.executionModel,
+    snapshot.project.executionReasoningEffort,
+    snapshot.project.plannerModel,
+    snapshot.project.plannerReasoningEffort,
+    snapshot.project.symphonyMaxConcurrentAgents,
+    snapshot.project.symphonyMaxTurns,
+  ]);
+
+  useEffect(() => {
+    if (plannerReasoningOptions.some((option) => option.value === plannerReasoningDraft)) {
+      return;
+    }
+
+    setPlannerReasoningDraft(
+      plannerReasoningOptions.at(-1)?.value ?? snapshot.project.plannerReasoningEffort,
+    );
+  }, [
+    plannerReasoningDraft,
+    plannerReasoningOptions,
+    snapshot.project.plannerReasoningEffort,
+  ]);
+
+  useEffect(() => {
+    if (executionReasoningOptions.some((option) => option.value === executionReasoningDraft)) {
+      return;
+    }
+
+    setExecutionReasoningDraft(
+      executionReasoningOptions.at(-1)?.value ?? snapshot.project.executionReasoningEffort,
+    );
+  }, [
+    executionReasoningDraft,
+    executionReasoningOptions,
+    snapshot.project.executionReasoningEffort,
+  ]);
 
   useEffect(() => {
     if (snapshot.symphony?.running) {
@@ -542,6 +639,58 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
         );
       } finally {
         setRenameSaving(false);
+      }
+    });
+  }
+
+  function saveProjectSettings() {
+    setProjectSettingsSaving(true);
+    setProjectSettingsError(null);
+    setProjectSettingsSaved(null);
+
+    startTransition(async () => {
+      try {
+        const response = await fetch(`/api/projects/${snapshot.project.id}`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            plannerModel: plannerModelDraft.trim() || null,
+            executionModel: executionModelDraft.trim() || null,
+            plannerReasoningEffort: plannerReasoningDraft,
+            executionReasoningEffort: executionReasoningDraft,
+            executionMode: executionModeDraft,
+            symphonyMaxConcurrentAgents: maxAgentsDraft,
+            symphonyMaxTurns: maxTurnsDraft,
+          }),
+        });
+        const payload = (await response.json()) as { error?: string };
+
+        if (!response.ok) {
+          throw new Error(payload.error ?? "Failed to update project settings.");
+        }
+
+        const refresh = await fetch(`/api/projects/${snapshot.project.id}/snapshot`, {
+          cache: "no-store",
+        });
+
+        if (refresh.ok) {
+          setSnapshot((await refresh.json()) as ProjectSnapshot);
+        }
+
+        router.refresh();
+        setProjectSettingsSaved(
+          snapshot.symphony?.running
+            ? "Project settings saved. Restart the automated run later if you want the next run to use them."
+            : "Project settings saved.",
+        );
+      } catch (error) {
+        setProjectSettingsError(
+          error instanceof Error ? error.message : "Failed to update project settings.",
+        );
+      } finally {
+        setProjectSettingsSaving(false);
       }
     });
   }
@@ -679,7 +828,7 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
                 {snapshot.project.name}
               </h1>
               <p className="max-w-3xl text-base leading-8 text-[var(--color-muted)]">
-                {snapshot.planVersion?.specIr.summary}
+                {projectOverviewSummary}
               </p>
             </div>
 
@@ -825,40 +974,106 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
                 </div>
                 <div className="rounded-[22px] border border-white/8 bg-white/4 p-4">
                   <p className="font-semibold text-[var(--color-ink)]">Planning model</p>
-                  <p className="mt-2">{snapshot.project.plannerModel ?? "Codex default"}</p>
+                  <div className="mt-2">
+                    <CodexModelSelect
+                      id="project-settings-planner-model"
+                      name="projectPlannerModel"
+                      value={plannerModelDraft}
+                      onChange={setPlannerModelDraft}
+                      options={modelOptions}
+                      defaultLabel="Codex default"
+                      defaultDescription="Let the installed Codex runtime choose the planning model."
+                    />
+                  </div>
                 </div>
                 <div className="rounded-[22px] border border-white/8 bg-white/4 p-4">
                   <p className="font-semibold text-[var(--color-ink)]">Execution model</p>
-                  <p className="mt-2">{snapshot.project.executionModel ?? "Codex default"}</p>
+                  <div className="mt-2">
+                    <CodexModelSelect
+                      id="project-settings-execution-model"
+                      name="projectExecutionModel"
+                      value={executionModelDraft}
+                      onChange={setExecutionModelDraft}
+                      options={modelOptions}
+                      defaultLabel="Codex default"
+                      defaultDescription="Let the installed Codex runtime choose the execution model."
+                    />
+                  </div>
                 </div>
                 <div className="rounded-[22px] border border-white/8 bg-white/4 p-4">
                   <p className="font-semibold text-[var(--color-ink)]">Planning thinking</p>
-                  <p className="mt-2">
-                    {codexReasoningEffortLabel(snapshot.project.plannerReasoningEffort)}
-                  </p>
+                  <div className="mt-2">
+                    <CodexReasoningSelect
+                      id="project-settings-planner-reasoning"
+                      name="projectPlannerReasoning"
+                      value={plannerReasoningDraft}
+                      onChange={setPlannerReasoningDraft}
+                      options={plannerReasoningOptions}
+                    />
+                  </div>
                 </div>
                 <div className="rounded-[22px] border border-white/8 bg-white/4 p-4">
                   <p className="font-semibold text-[var(--color-ink)]">Agent thinking</p>
-                  <p className="mt-2">
-                    {codexReasoningEffortLabel(snapshot.project.executionReasoningEffort)}
-                  </p>
+                  <div className="mt-2">
+                    <CodexReasoningSelect
+                      id="project-settings-execution-reasoning"
+                      name="projectExecutionReasoning"
+                      value={executionReasoningDraft}
+                      onChange={setExecutionReasoningDraft}
+                      options={executionReasoningOptions}
+                    />
+                  </div>
                 </div>
                 <div className="rounded-[22px] border border-white/8 bg-white/4 p-4">
                   <p className="font-semibold text-[var(--color-ink)]">Parallel workers / turns</p>
-                  <p className="mt-2">
-                    {snapshot.project.symphonyMaxConcurrentAgents} / {snapshot.project.symphonyMaxTurns}
-                  </p>
+                  <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                    <input
+                      aria-label="Parallel workers"
+                      type="number"
+                      min="1"
+                      max="8"
+                      value={maxAgentsDraft}
+                      onChange={(event) => setMaxAgentsDraft(Number(event.target.value))}
+                      className="glass-input rounded-[18px] px-4 py-3"
+                    />
+                    <input
+                      aria-label="Max turns per ticket"
+                      type="number"
+                      min="4"
+                      max="80"
+                      value={maxTurnsDraft}
+                      onChange={(event) => setMaxTurnsDraft(Number(event.target.value))}
+                      className="glass-input rounded-[18px] px-4 py-3"
+                    />
+                  </div>
                 </div>
                 <div className="rounded-[22px] border border-white/8 bg-white/4 p-4 sm:col-span-2">
                   <p className="font-semibold text-[var(--color-ink)]">Run mode</p>
-                  <p className="mt-2">
-                    {snapshot.project.executionMode === "local_chatgpt"
-                      ? "Local ChatGPT Codex"
-                      : "Hosted API Codex"}
+                  <select
+                    value={executionModeDraft}
+                    onChange={(event) =>
+                      setExecutionModeDraft(event.target.value as ExecutionMode)
+                    }
+                    className="glass-input mt-2 w-full rounded-[18px] px-4 py-3"
+                  >
+                    <option value="local_chatgpt">Local ChatGPT Codex</option>
+                    <option value="hosted_api">Hosted API Codex</option>
+                  </select>
+                  <p className="mt-3 text-xs leading-6 text-[var(--color-muted)]">
+                    Existing projects keep the settings they were created with until you change
+                    them here.
                   </p>
                 </div>
               </div>
               <div className="mt-4 flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  disabled={projectSettingsSaving || !projectSettingsChanged}
+                  onClick={saveProjectSettings}
+                  className="glass-button inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {projectSettingsSaving ? "Saving project settings..." : "Save project settings"}
+                </button>
                 <Link
                   href="/settings"
                   className="inline-flex items-center gap-2 rounded-full border border-[var(--color-border)] bg-white/6 px-4 py-2 text-sm font-semibold text-[var(--color-muted)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-ink)]"
@@ -876,6 +1091,12 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
                   {deleting ? "Deleting..." : "Delete project"}
                 </button>
               </div>
+              {projectSettingsSaved ? (
+                <p className="mt-3 text-sm text-[var(--color-success)]">{projectSettingsSaved}</p>
+              ) : null}
+              {projectSettingsError ? (
+                <p className="mt-3 text-sm text-[var(--color-danger)]">{projectSettingsError}</p>
+              ) : null}
             </details>
           </aside>
         </div>
@@ -1032,6 +1253,19 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
                     {formatDateTime(snapshot.project.createdAt)}
                   </p>
                 </div>
+                <div className="rounded-[22px] border border-white/8 bg-white/4 p-4 sm:col-span-2">
+                  <p className="font-semibold text-[var(--color-ink)]">
+                    Total project tokens
+                  </p>
+                  <p className="mt-2 text-sm text-[var(--color-muted)]">
+                    {projectTokenUsage.totalTokens.toLocaleString()} total across every run for this
+                    project.
+                  </p>
+                  <p className="mt-2 text-xs uppercase tracking-[0.18em] text-[var(--color-muted)]">
+                    {projectTokenUsage.inputTokens.toLocaleString()} in /{" "}
+                    {projectTokenUsage.outputTokens.toLocaleString()} out
+                  </p>
+                </div>
               </div>
             </div>
           </div>
@@ -1130,8 +1364,13 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
                 <h2 className="text-2xl font-semibold text-[var(--color-ink)]">
                   Working right now
                 </h2>
-                <div className="rounded-full border border-white/8 bg-white/4 px-3 py-1 text-sm text-[var(--color-muted)]">
-                  Tokens used: {totalTokens(codexTotals).toLocaleString()}
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="rounded-full border border-white/8 bg-white/4 px-3 py-1 text-sm text-[var(--color-muted)]">
+                    This run: {liveRunTokenUsage.totalTokens.toLocaleString()} tokens
+                  </div>
+                  <div className="rounded-full border border-white/8 bg-white/4 px-3 py-1 text-sm text-[var(--color-muted)]">
+                    All runs: {projectTokenUsage.totalTokens.toLocaleString()} tokens
+                  </div>
                 </div>
               </div>
               <div className="mt-5 space-y-3">
@@ -1150,7 +1389,7 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
                       <div className="mt-3 grid gap-3 sm:grid-cols-2">
                         <p>Started: {asString(session.started_at) ? formatRelativeTime(asString(session.started_at)) : "n/a"}</p>
                         <p>Turns: {asNumber(session.turn_count)}</p>
-                        <p>Tokens: {totalTokens(session.tokens).toLocaleString()}</p>
+                        <p>Tokens: {parseTokenUsage(session.tokens).totalTokens.toLocaleString()}</p>
                         <p>Last update: {asString(session.last_event_at) ? formatRelativeTime(asString(session.last_event_at)) : "n/a"}</p>
                       </div>
                       <p className="mt-3 text-sm leading-6 text-[var(--color-muted)]">
@@ -1344,7 +1583,7 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
                 <div className="rounded-[22px] border border-white/8 bg-white/4 p-4 sm:col-span-2">
                   <p className="font-semibold text-[var(--color-ink)]">Summary</p>
                   <p className="mt-2 text-sm leading-7 text-[var(--color-muted)]">
-                    {snapshot.planVersion?.specIr.summary}
+                    {projectOverviewSummary}
                   </p>
                 </div>
               </div>

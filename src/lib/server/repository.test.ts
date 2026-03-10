@@ -5,7 +5,7 @@ import type { SpecIR } from "@/lib/types";
 
 const SPEC_IR: SpecIR = {
   summary:
-    "A delivery blueprint for validating project creation and deletion across persisted runtime state.",
+    "Build Placeholder Project as a delivery blueprint for validating project creation and deletion across persisted runtime state.",
   outline: [
     {
       title: "Blueprint",
@@ -50,7 +50,10 @@ describe("repository lifecycle", () => {
     mkdirSync(path.dirname(dbPath), { recursive: true });
 
     vi.doMock("@/lib/server/llm-planner", () => ({
-      buildSpecIrWithLlm: vi.fn(async () => SPEC_IR),
+      buildSpecIrWithLlm: vi.fn(async (input: { name: string }) => ({
+        ...SPEC_IR,
+        summary: `Build ${input.name} as a delivery blueprint for validating project creation and deletion across persisted runtime state.`,
+      })),
     }));
     vi.doMock("@/lib/server/symphony-manager", () => ({
       stopSymphonyForProject: vi.fn(async () => ({ stopped: true })),
@@ -134,5 +137,85 @@ describe("repository lifecycle", () => {
     expect(updated?.slug).toBe(created.slug);
     expect(snapshot?.project.name).toBe("Renamed Project");
     expect(snapshot?.project.slug).toBe(created.slug);
+    expect(snapshot?.planVersion?.specIr.summary).toContain("Renamed Project");
+    expect(snapshot?.planVersion?.specIr.summary).not.toContain("Original Name");
+  });
+
+  it("updates an existing project's captured execution settings", async () => {
+    const repository = await import("@/lib/server/repository");
+
+    const created = await repository.createProjectFromSpec({
+      name: "Settings Project",
+      repoSource: ".",
+      executionMode: "local_chatgpt",
+      specFilename: "plan.md",
+      specText: "# Blueprint\n\n## Goal\nAllow existing project settings to be edited",
+    });
+
+    const updated = repository.updateProjectSettings(created.projectId, {
+      plannerModel: "gpt-5.4",
+      executionModel: "gpt-5.4",
+      plannerReasoningEffort: "xhigh",
+      executionReasoningEffort: "xhigh",
+      executionMode: "hosted_api",
+      symphonyMaxConcurrentAgents: 5,
+      symphonyMaxTurns: 36,
+    });
+    const snapshot = repository.getProjectSnapshot(created.projectId);
+
+    expect(updated?.plannerModel).toBe("gpt-5.4");
+    expect(updated?.executionModel).toBe("gpt-5.4");
+    expect(updated?.plannerReasoningEffort).toBe("xhigh");
+    expect(updated?.executionReasoningEffort).toBe("xhigh");
+    expect(updated?.executionMode).toBe("hosted_api");
+    expect(updated?.symphonyMaxConcurrentAgents).toBe(5);
+    expect(updated?.symphonyMaxTurns).toBe(36);
+    expect(snapshot?.project.plannerReasoningEffort).toBe("xhigh");
+    expect(snapshot?.project.executionReasoningEffort).toBe("xhigh");
+    expect(snapshot?.project.symphonyMaxConcurrentAgents).toBe(5);
+    expect(snapshot?.project.symphonyMaxTurns).toBe(36);
+  });
+
+  it("preserves repo source when updating unrelated project settings", async () => {
+    const repository = await import("@/lib/server/repository");
+
+    const created = await repository.createProjectFromSpec({
+      name: "Repo Source Project",
+      repoSource: ".",
+      executionMode: "local_chatgpt",
+      specFilename: "plan.md",
+      specText: "# Blueprint\n\n## Goal\nKeep repo source unchanged during settings edits",
+    });
+
+    const before = repository.getProjectSnapshot(created.projectId);
+
+    repository.updateProjectSettings(created.projectId, {
+      plannerReasoningEffort: "xhigh",
+    });
+
+    const snapshot = repository.getProjectSnapshot(created.projectId);
+
+    expect(snapshot?.project.repoSource).toBe(before?.project.repoSource);
+  });
+
+  it("stores zeroed cumulative token usage and inherits the new default agent count", async () => {
+    const repository = await import("@/lib/server/repository");
+
+    const created = await repository.createProjectFromSpec({
+      name: "Default Concurrency",
+      repoSource: ".",
+      executionMode: "local_chatgpt",
+      specFilename: "plan.md",
+      specText: "# Blueprint\n\n## Goal\nUse the platform defaults for a new project",
+    });
+
+    const snapshot = repository.getProjectSnapshot(created.projectId);
+
+    expect(snapshot?.project.symphonyMaxConcurrentAgents).toBe(5);
+    expect(snapshot?.project.cumulativeTokenUsage).toEqual({
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+    });
   });
 });

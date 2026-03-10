@@ -4,6 +4,7 @@ import { accessSync, openSync } from "node:fs";
 import { mkdir, open, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { appendProjectTokenUsageBySlug } from "@/lib/server/project-token-usage";
 import {
   getSymphonyTrackerToken,
   normalizeRepoSource,
@@ -16,6 +17,13 @@ import {
   getProjectWorkspaceRoot,
   getWorkspaceRoot,
 } from "@/lib/server/storage";
+import {
+  EMPTY_TOKEN_USAGE,
+  hasTokenUsage,
+  maxTokenUsage,
+  parseTokenUsage,
+  type TokenUsage,
+} from "@/lib/token-usage";
 
 function shellQuote(value: string) {
   return `'${value.replace(/'/g, `'\"'\"'`)}'`;
@@ -76,6 +84,17 @@ function runtimePaths(projectSlug: string) {
     bootstrapLogPath: path.join(runtimeRoot, "bootstrap.log"),
   };
 }
+
+type PersistedSymphonyRuntime = {
+  pid: number;
+  port: number;
+  workflowPath: string;
+  logsRoot: string;
+  bootstrapLogPath: string;
+  startedAt: string;
+  lastObservedTokenUsage: TokenUsage;
+  projectTokenUsageArchivedAt: string | null;
+};
 
 const DEFAULT_BOOTSTRAP_LOG_TAIL_BYTES = Number(
   process.env.OVERTURE_BOOTSTRAP_LOG_TAIL_BYTES ?? 128 * 1024,
@@ -169,6 +188,18 @@ async function ensureSymphonyBuilt() {
   accessSync(symphonyBinaryPath(), fsConstants.X_OK);
 }
 
+export function buildCodexAppServerCommand(project: Pick<ProjectRecord, "executionModel" | "executionReasoningEffort">) {
+  const codexBin = resolveCodexBin();
+
+  return [
+    shellQuote(codexBin),
+    "-c",
+    shellQuote(`model_reasoning_effort="${project.executionReasoningEffort}"`),
+    ...(project.executionModel ? ["--model", shellQuote(project.executionModel)] : []),
+    "app-server",
+  ].join(" ");
+}
+
 function buildWorkflow(
   project: ProjectRecord,
   origin: string,
@@ -177,14 +208,7 @@ function buildWorkflow(
   const workspaceRoot = getProjectWorkspaceRoot(project.slug);
   const repoSource = normalizeRepoSource(project.repoSource);
   const workspaceBootstrapCommand = buildWorkspaceBootstrapCommand(repoSource);
-  const codexBin = resolveCodexBin();
-  const codexCommand = [
-    shellQuote(codexBin),
-    "app-server",
-    "-c",
-    shellQuote(`model_reasoning_effort="${project.executionReasoningEffort}"`),
-    ...(project.executionModel ? ["--model", shellQuote(project.executionModel)] : []),
-  ].join(" ");
+  const codexCommand = buildCodexAppServerCommand(project);
 
   return [
     "---",
@@ -361,17 +385,92 @@ async function readRuntimeFile(projectSlug: string) {
   const { runtimeFilePath } = runtimePaths(projectSlug);
 
   try {
-    return JSON.parse(await readFile(runtimeFilePath, "utf8")) as {
-      pid: number;
-      port: number;
-      workflowPath: string;
-      logsRoot: string;
-      bootstrapLogPath: string;
-      startedAt: string;
-    };
+    const payload = JSON.parse(await readFile(runtimeFilePath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+
+    return {
+      pid: Number(payload.pid ?? -1),
+      port: Number(payload.port ?? -1),
+      workflowPath: String(payload.workflowPath ?? ""),
+      logsRoot: String(payload.logsRoot ?? ""),
+      bootstrapLogPath: String(payload.bootstrapLogPath ?? ""),
+      startedAt: String(payload.startedAt ?? ""),
+      lastObservedTokenUsage: parseTokenUsage(payload.lastObservedTokenUsage),
+      projectTokenUsageArchivedAt:
+        typeof payload.projectTokenUsageArchivedAt === "string" &&
+        payload.projectTokenUsageArchivedAt.trim()
+          ? payload.projectTokenUsageArchivedAt
+          : null,
+    } satisfies PersistedSymphonyRuntime;
   } catch {
     return null;
   }
+}
+
+async function writeRuntimeFile(projectSlug: string, runtime: PersistedSymphonyRuntime) {
+  const { runtimeFilePath } = runtimePaths(projectSlug);
+
+  await writeFile(runtimeFilePath, JSON.stringify(runtime, null, 2), "utf8");
+}
+
+function tokenUsageFromState(state: Record<string, unknown> | null) {
+  const codexTotals =
+    state && typeof state.codex_totals === "object" && !Array.isArray(state.codex_totals)
+      ? state.codex_totals
+      : null;
+
+  return parseTokenUsage(codexTotals);
+}
+
+function sameTokenUsage(left: TokenUsage, right: TokenUsage) {
+  return (
+    left.inputTokens === right.inputTokens &&
+    left.outputTokens === right.outputTokens &&
+    left.totalTokens === right.totalTokens
+  );
+}
+
+async function persistObservedTokenUsage(
+  projectSlug: string,
+  runtime: PersistedSymphonyRuntime,
+  state: Record<string, unknown>,
+) {
+  const observed = maxTokenUsage(runtime.lastObservedTokenUsage, tokenUsageFromState(state));
+
+  if (sameTokenUsage(observed, runtime.lastObservedTokenUsage)) {
+    return runtime;
+  }
+
+  const next = {
+    ...runtime,
+    lastObservedTokenUsage: observed,
+  } satisfies PersistedSymphonyRuntime;
+
+  await writeRuntimeFile(projectSlug, next);
+  return next;
+}
+
+async function archiveObservedTokenUsage(
+  projectSlug: string,
+  runtime: PersistedSymphonyRuntime,
+) {
+  if (runtime.projectTokenUsageArchivedAt) {
+    return runtime;
+  }
+
+  if (hasTokenUsage(runtime.lastObservedTokenUsage)) {
+    appendProjectTokenUsageBySlug(projectSlug, runtime.lastObservedTokenUsage);
+  }
+
+  const next = {
+    ...runtime,
+    projectTokenUsageArchivedAt: new Date().toISOString(),
+  } satisfies PersistedSymphonyRuntime;
+
+  await writeRuntimeFile(projectSlug, next);
+  return next;
 }
 
 async function waitForSymphonyReady(runtime: {
@@ -406,7 +505,7 @@ async function waitForSymphonyReady(runtime: {
 }
 
 export async function getSymphonyRuntime(projectSlug: string) {
-  const runtime = await readRuntimeFile(projectSlug);
+  let runtime = await readRuntimeFile(projectSlug);
 
   if (!runtime) {
     return null;
@@ -414,8 +513,17 @@ export async function getSymphonyRuntime(projectSlug: string) {
 
   const stateUrl = `http://127.0.0.1:${runtime.port}/api/v1/state`;
   const state = await fetchStateSnapshot(stateUrl);
+
+  if (state) {
+    runtime = await persistObservedTokenUsage(projectSlug, runtime, state);
+  }
+
   const bootstrapTail = await readLogTail(runtime.bootstrapLogPath);
   const running = Boolean(state) || processIsRunning(runtime.pid);
+
+  if (!running) {
+    runtime = await archiveObservedTokenUsage(projectSlug, runtime);
+  }
 
   return {
     ...runtime,
@@ -439,6 +547,12 @@ export async function startSymphonyForProject(project: ProjectRecord, origin: st
     }
 
     return existing;
+  }
+
+  const previousRuntime = await readRuntimeFile(project.slug);
+
+  if (previousRuntime && !previousRuntime.projectTokenUsageArchivedAt) {
+    await archiveObservedTokenUsage(project.slug, previousRuntime);
   }
 
   await ensureSymphonyBuilt();
@@ -475,13 +589,11 @@ export async function startSymphonyForProject(project: ProjectRecord, origin: st
     logsRoot: paths.logsRoot,
     bootstrapLogPath: paths.bootstrapLogPath,
     startedAt: new Date().toISOString(),
-  };
+    lastObservedTokenUsage: EMPTY_TOKEN_USAGE,
+    projectTokenUsageArchivedAt: null,
+  } satisfies PersistedSymphonyRuntime;
 
-  await writeFile(
-    paths.runtimeFilePath,
-    JSON.stringify(runtime, null, 2),
-    "utf8",
-  );
+  await writeRuntimeFile(project.slug, runtime);
 
   await waitForSymphonyReady(runtime);
 
@@ -536,6 +648,12 @@ export async function stopSymphonyForProject(projectSlug: string) {
 
   if (runtime.pid > 0 && processIsRunning(runtime.pid)) {
     await stopRuntimeProcess(runtime.pid);
+  }
+
+  const persistedRuntime = await readRuntimeFile(projectSlug);
+
+  if (persistedRuntime && !persistedRuntime.projectTokenUsageArchivedAt) {
+    await archiveObservedTokenUsage(projectSlug, persistedRuntime);
   }
 
   await rm(runtimeFilePath, { force: true });

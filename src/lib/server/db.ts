@@ -41,13 +41,16 @@ function runMigrations(db: Database.Database) {
       execution_model TEXT,
       planner_reasoning_effort TEXT NOT NULL DEFAULT 'low',
       execution_reasoning_effort TEXT NOT NULL DEFAULT 'medium',
-      symphony_max_concurrent_agents INTEGER NOT NULL DEFAULT 2,
+      symphony_max_concurrent_agents INTEGER NOT NULL DEFAULT 5,
       symphony_max_turns INTEGER NOT NULL DEFAULT 24,
       status TEXT NOT NULL,
       health TEXT NOT NULL,
       qa_strictness INTEGER NOT NULL,
       security_strictness INTEGER NOT NULL,
       deployment_targets_json TEXT NOT NULL,
+      cumulative_input_tokens INTEGER NOT NULL DEFAULT 0,
+      cumulative_output_tokens INTEGER NOT NULL DEFAULT 0,
+      cumulative_total_tokens INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       last_activity_at TEXT NOT NULL
@@ -230,15 +233,40 @@ function runMigrations(db: Database.Database) {
     db,
     "projects",
     "symphony_max_concurrent_agents",
-    "INTEGER NOT NULL DEFAULT 2",
+    "INTEGER NOT NULL DEFAULT 5",
   );
   ensureColumn(db, "projects", "symphony_max_turns", "INTEGER NOT NULL DEFAULT 24");
+  ensureColumn(
+    db,
+    "projects",
+    "cumulative_input_tokens",
+    "INTEGER NOT NULL DEFAULT 0",
+  );
+  ensureColumn(
+    db,
+    "projects",
+    "cumulative_output_tokens",
+    "INTEGER NOT NULL DEFAULT 0",
+  );
+  ensureColumn(
+    db,
+    "projects",
+    "cumulative_total_tokens",
+    "INTEGER NOT NULL DEFAULT 0",
+  );
   ensureColumn(
     db,
     "app_settings",
     "execution_reasoning_effort",
     "TEXT NOT NULL DEFAULT 'medium'",
   );
+  db.prepare(
+    `
+      UPDATE app_settings
+      SET symphony_max_concurrent_agents = 5
+      WHERE id = 'default' AND symphony_max_concurrent_agents = 2
+    `,
+  ).run();
 }
 
 export function getDb() {

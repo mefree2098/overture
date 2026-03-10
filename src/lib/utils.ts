@@ -43,6 +43,46 @@ export function stripAnsi(value: string) {
     .trim();
 }
 
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+export function rewriteSummaryForProjectName(
+  summary: string,
+  nextProjectName: string,
+  previousProjectName?: string | null,
+) {
+  const trimmedSummary = summary.trim();
+  const trimmedNextName = nextProjectName.trim();
+  const trimmedPreviousName = previousProjectName?.trim() ?? "";
+
+  if (!trimmedSummary || !trimmedNextName) {
+    return trimmedSummary;
+  }
+
+  if (trimmedSummary.includes(trimmedNextName)) {
+    return trimmedSummary;
+  }
+
+  if (trimmedPreviousName && trimmedPreviousName !== trimmedNextName) {
+    const exactNamePattern = new RegExp(escapeRegExp(trimmedPreviousName), "g");
+    const replacedExactName = trimmedSummary.replace(exactNamePattern, trimmedNextName);
+
+    if (replacedExactName !== trimmedSummary) {
+      return replacedExactName;
+    }
+  }
+
+  const actionPattern =
+    /^(Build|Create|Implement|Deliver|Launch|Develop|Turn|Transform|Make)\s+(.+?)\s+(as|into|for)\b/i;
+
+  return trimmedSummary.replace(
+    actionPattern,
+    (_match, action: string, _currentTarget: string, connector: string) =>
+      `${action} ${trimmedNextName} ${connector}`,
+  );
+}
+
 export function tryParseJson<T>(value: string | null): T {
   if (!value) {
     return {} as T;

@@ -7,6 +7,7 @@ import { getAppSettings } from "@/lib/server/app-settings";
 import { getDb } from "@/lib/server/db";
 import { buildSpecIrWithLlm } from "@/lib/server/llm-planner";
 import { generatePlanFromSpec } from "@/lib/server/plan-generator";
+import { hydrateStoredProjectTokenUsage } from "@/lib/server/project-token-usage";
 import { normalizeRepoSource } from "@/lib/server/runtime-config";
 import { getContentHash } from "@/lib/server/spec-parser";
 import { stopSymphonyForProject } from "@/lib/server/symphony-manager";
@@ -35,7 +36,7 @@ import type {
   WorkItemRecord,
   WorkItemStatus,
 } from "@/lib/types";
-import { slugify, tryParseJson } from "@/lib/utils";
+import { rewriteSummaryForProjectName, slugify, tryParseJson } from "@/lib/utils";
 
 function nowIso() {
   return new Date().toISOString();
@@ -43,6 +44,19 @@ function nowIso() {
 
 function serialise(value: unknown) {
   return JSON.stringify(value);
+}
+
+function sanitizeOptionalModel(value: string | null | undefined) {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function normalizeExecutionMode(value: string | null | undefined): ProjectRecord["executionMode"] {
+  return value === "hosted_api" ? "hosted_api" : "local_chatgpt";
 }
 
 function sanitizeBranchSegment(value: string) {
@@ -174,13 +188,14 @@ function hydrateProject(row: Record<string, unknown>): ProjectRecord {
       normalizeCodexReasoningEffort(
         row.execution_reasoning_effort as string | null | undefined,
       ),
-    symphonyMaxConcurrentAgents: Number(row.symphony_max_concurrent_agents ?? 2),
+    symphonyMaxConcurrentAgents: Number(row.symphony_max_concurrent_agents ?? 5),
     symphonyMaxTurns: Number(row.symphony_max_turns ?? 24),
     status: String(row.status),
     health: row.health as ProjectRecord["health"],
     qaStrictness: Number(row.qa_strictness),
     securityStrictness: Number(row.security_strictness),
     deploymentTargets: tryParseJson(row.deployment_targets_json as string),
+    cumulativeTokenUsage: hydrateStoredProjectTokenUsage(row),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
     lastActivityAt: String(row.last_activity_at),
@@ -211,6 +226,36 @@ function hydratePlanVersion(row: Record<string, unknown>): PlanVersionRecord {
     review: tryParseJson(row.review_json as string),
     createdAt: String(row.created_at),
   };
+}
+
+function normalizePlanVersionSummary(
+  projectName: string,
+  planVersion: PlanVersionRecord | null,
+) {
+  if (!planVersion) {
+    return null;
+  }
+
+  const nextSpecSummary = rewriteSummaryForProjectName(
+    planVersion.specIr.summary,
+    projectName,
+  );
+  const nextPlanSummary =
+    typeof planVersion.summary.summary === "string"
+      ? rewriteSummaryForProjectName(planVersion.summary.summary, projectName)
+      : planVersion.summary.summary;
+
+  return {
+    ...planVersion,
+    summary: {
+      ...planVersion.summary,
+      ...(typeof nextPlanSummary === "string" ? { summary: nextPlanSummary } : {}),
+    },
+    specIr: {
+      ...planVersion.specIr,
+      summary: nextSpecSummary,
+    },
+  } satisfies PlanVersionRecord;
 }
 
 function hydrateWorkItem(row: Record<string, unknown>): WorkItemRecord {
@@ -786,7 +831,10 @@ export function getProjectSnapshot(projectId: string): ProjectSnapshot | null {
       health: computeProjectHealth(gateStatus, counts),
     },
     specDocument: specDocument ? hydrateSpecDocument(specDocument) : null,
-    planVersion: planVersion ? hydratePlanVersion(planVersion) : null,
+    planVersion: normalizePlanVersionSummary(
+      project.name,
+      planVersion ? hydratePlanVersion(planVersion) : null,
+    ),
     workItems,
     dependencyEdges,
     runs,
@@ -837,13 +885,30 @@ export async function deleteProject(projectId: string) {
 }
 
 export function updateProjectName(projectId: string, name: string) {
+  return updateProjectSettings(projectId, {
+    name,
+  });
+}
+
+export function updateProjectSettings(
+  projectId: string,
+  updates: Partial<
+    Pick<
+      ProjectRecord,
+      | "name"
+      | "repoSource"
+      | "executionMode"
+      | "plannerModel"
+      | "executionModel"
+      | "plannerReasoningEffort"
+      | "executionReasoningEffort"
+      | "symphonyMaxConcurrentAgents"
+      | "symphonyMaxTurns"
+    >
+  >,
+) {
   const db = getDb();
   const timestamp = nowIso();
-  const normalizedName = name.trim();
-
-  if (!normalizedName) {
-    throw new Error("Project name is required.");
-  }
 
   const existing = db
     .prepare("SELECT * FROM projects WHERE id = ?")
@@ -853,13 +918,143 @@ export function updateProjectName(projectId: string, name: string) {
     return null;
   }
 
-  db.prepare(
+  const current = hydrateProject(existing);
+  const normalizedName = (updates.name ?? current.name).trim();
+
+  if (!normalizedName) {
+    throw new Error("Project name is required.");
+  }
+
+  const previousName = String(existing.name ?? "").trim();
+  const nextRepoSource =
+    typeof updates.repoSource === "string"
+      ? normalizeRepoSource(updates.repoSource)
+      : current.repoSource;
+  const nextExecutionMode = normalizeExecutionMode(
+    updates.executionMode ?? current.executionMode,
+  );
+  const nextPlannerModel = sanitizeOptionalModel(
+    updates.plannerModel ?? current.plannerModel,
+  );
+  const nextExecutionModel = sanitizeOptionalModel(
+    updates.executionModel ?? current.executionModel,
+  );
+  const nextPlannerReasoningEffort = normalizeCodexReasoningEffort(
+    updates.plannerReasoningEffort ?? current.plannerReasoningEffort,
+  );
+  const nextExecutionReasoningEffort = normalizeCodexReasoningEffort(
+    updates.executionReasoningEffort ?? current.executionReasoningEffort,
+  );
+  const nextMaxAgents = clamp(
+    Number(updates.symphonyMaxConcurrentAgents ?? current.symphonyMaxConcurrentAgents),
+    1,
+    8,
+  );
+  const nextMaxTurns = clamp(
+    Number(updates.symphonyMaxTurns ?? current.symphonyMaxTurns),
+    4,
+    80,
+  );
+  const updateProject = db.prepare(
     `
       UPDATE projects
-      SET name = ?, updated_at = ?, last_activity_at = ?
+      SET
+        name = ?,
+        repo_source = ?,
+        execution_mode = ?,
+        planner_model = ?,
+        execution_model = ?,
+        planner_reasoning_effort = ?,
+        execution_reasoning_effort = ?,
+        symphony_max_concurrent_agents = ?,
+        symphony_max_turns = ?,
+        updated_at = ?,
+        last_activity_at = ?
       WHERE id = ?
     `,
-  ).run(normalizedName, timestamp, timestamp, projectId);
+  );
+  const updatePlanVersion = db.prepare(
+    `
+      UPDATE plan_versions
+      SET summary_json = ?, spec_ir_json = ?
+      WHERE id = ?
+    `,
+  );
+
+  db.transaction(() => {
+    updateProject.run(
+      normalizedName,
+      nextRepoSource,
+      nextExecutionMode,
+      nextPlannerModel,
+      nextExecutionModel,
+      nextPlannerReasoningEffort,
+      nextExecutionReasoningEffort,
+      nextMaxAgents,
+      nextMaxTurns,
+      timestamp,
+      timestamp,
+      projectId,
+    );
+
+    const planVersions = db
+      .prepare("SELECT id, summary_json, spec_ir_json FROM plan_versions WHERE project_id = ?")
+      .all(projectId) as Array<Record<string, unknown>>;
+
+    for (const row of planVersions) {
+      const planSummary = tryParseJson<Record<string, unknown>>(row.summary_json as string);
+      const specIr = tryParseJson<Record<string, unknown>>(row.spec_ir_json as string);
+      const nextPlanSummary =
+        typeof planSummary.summary === "string"
+          ? rewriteSummaryForProjectName(planSummary.summary, normalizedName, previousName)
+          : planSummary.summary;
+      const nextSpecSummary =
+        typeof specIr.summary === "string"
+          ? rewriteSummaryForProjectName(specIr.summary, normalizedName, previousName)
+          : specIr.summary;
+
+      if (
+        nextPlanSummary === planSummary.summary &&
+        nextSpecSummary === specIr.summary
+      ) {
+        continue;
+      }
+
+      updatePlanVersion.run(
+        serialise({
+          ...planSummary,
+          summary: nextPlanSummary,
+        }),
+        serialise({
+          ...specIr,
+          summary: nextSpecSummary,
+        }),
+        String(row.id),
+      );
+    }
+  })();
+
+  appendAuditEvent({
+    projectId,
+    actor: "control-plane",
+    action: "project.settings.updated",
+    detail:
+      previousName !== normalizedName
+        ? `Project renamed from ${previousName || "Untitled project"} to ${normalizedName}.`
+        : `Project settings updated for ${normalizedName}.`,
+    payload: {
+      previousName,
+      nextName: normalizedName,
+      repoSource: nextRepoSource,
+      executionMode: nextExecutionMode,
+      plannerModel: nextPlannerModel,
+      executionModel: nextExecutionModel,
+      plannerReasoningEffort: nextPlannerReasoningEffort,
+      executionReasoningEffort: nextExecutionReasoningEffort,
+      symphonyMaxConcurrentAgents: nextMaxAgents,
+      symphonyMaxTurns: nextMaxTurns,
+    },
+  });
 
   return hydrateProject(
     db.prepare("SELECT * FROM projects WHERE id = ?").get(projectId) as Record<string, unknown>,
@@ -949,8 +1144,8 @@ export async function createProjectFromSpec(input: CreateProjectInput) {
     db.prepare(
       `
         INSERT INTO projects (
-          id, slug, name, repo_source, execution_mode, planner_model, execution_model, planner_reasoning_effort, execution_reasoning_effort, symphony_max_concurrent_agents, symphony_max_turns, status, health, qa_strictness, security_strictness, deployment_targets_json, created_at, updated_at, last_activity_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          id, slug, name, repo_source, execution_mode, planner_model, execution_model, planner_reasoning_effort, execution_reasoning_effort, symphony_max_concurrent_agents, symphony_max_turns, status, health, qa_strictness, security_strictness, deployment_targets_json, cumulative_input_tokens, cumulative_output_tokens, cumulative_total_tokens, created_at, updated_at, last_activity_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
     ).run(
       projectId,
@@ -969,6 +1164,9 @@ export async function createProjectFromSpec(input: CreateProjectInput) {
       policyProfile.qaStrictness,
       policyProfile.securityStrictness,
       serialise(policyProfile.deploymentTargets),
+      0,
+      0,
+      0,
       timestamp,
       timestamp,
       timestamp,

@@ -17,6 +17,7 @@ The current app is a working Next.js control plane with SQLite persistence, real
 - Exposes a Linear-compatible tracker GraphQL surface for Symphony polling
 - Launches Symphony against a per-project workflow contract
 - Tracks gate readiness, runtime state, artifacts, findings, and audit history in the UI
+- Tracks both live-run token usage and the cumulative project token total across every run
 - Supports hard deletion of failed or stale projects from the dashboard and project page
 - Lets users choose planner and execution model defaults plus Codex thinking levels in `/settings`, with per-project overrides available in the intake flow
 
@@ -164,11 +165,11 @@ Open `/settings` in the UI to control:
 - QA and security strictness defaults
 - Symphony parallelism and max-turn limits
 
-These settings apply to new projects only. Existing projects keep the planner/execution settings captured when they were created.
+The shipped default for new projects is now `5` simultaneous Symphony agents.
+
+These settings apply to new projects by default. Existing projects keep the planner/execution settings captured when they were created until you edit them from the project page under `Project settings and options`.
 
 If you leave either model on `Codex default`, Overture lets the installed Codex CLI choose the runtime default. Otherwise you can pick from the current built-in Codex model catalog in the dropdown.
-
-Existing projects can also be renamed from the project page under `Project settings and options`.
 
 ## Create and execute a project
 
@@ -185,6 +186,7 @@ npm run runner -- <project-id>
 ```
 
 The project page shows live Symphony runtime state, bootstrap logs, retry queues, tracker slices, artifacts, findings, and gate status.
+It also shows both the current live-run token count and the total token count accumulated across all runs for that project.
 
 ## Run another project
 

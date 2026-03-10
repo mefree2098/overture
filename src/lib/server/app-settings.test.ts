@@ -30,7 +30,7 @@ describe("app settings", () => {
     expect(defaults.plannerModel).toBeNull();
     expect(defaults.executionModel).toBeNull();
     expect(defaults.executionReasoningEffort).toBe("medium");
-    expect(defaults.symphonyMaxConcurrentAgents).toBe(2);
+    expect(defaults.symphonyMaxConcurrentAgents).toBe(5);
     expect(defaults.symphonyMaxTurns).toBe(24);
 
     const updated = settingsModule.updateAppSettings({

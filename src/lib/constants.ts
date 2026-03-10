@@ -74,6 +74,6 @@ export const DEFAULT_APP_SETTINGS = {
   defaultRepoSource: ".",
   defaultQaStrictness: 4,
   defaultSecurityStrictness: 4,
-  symphonyMaxConcurrentAgents: 2,
+  symphonyMaxConcurrentAgents: 5,
   symphonyMaxTurns: 24,
 } as const;

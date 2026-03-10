@@ -16,8 +16,11 @@ export async function GET(
     return NextResponse.json({ error: "Project not found." }, { status: 404 });
   }
 
+  const symphony = await getSymphonyRuntime(snapshot.project.slug);
+  const refreshedSnapshot = getProjectSnapshot(projectId) ?? snapshot;
+
   return NextResponse.json({
-    ...snapshot,
-    symphony: await getSymphonyRuntime(snapshot.project.slug),
+    ...refreshedSnapshot,
+    symphony,
   });
 }

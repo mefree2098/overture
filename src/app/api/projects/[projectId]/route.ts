@@ -4,14 +4,25 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import {
-  appendAuditEvent,
   deleteProject,
-  updateProjectName,
+  updateProjectSettings,
 } from "@/lib/server/repository";
 
-const updateProjectSchema = z.object({
-  name: z.string().trim().min(2).max(120),
-});
+const updateProjectSchema = z
+  .object({
+    name: z.string().trim().min(2).max(120).optional(),
+    repoSource: z.string().trim().min(1).max(500).optional(),
+    executionMode: z.enum(["local_chatgpt", "hosted_api"]).optional(),
+    plannerModel: z.string().max(120).nullable().optional(),
+    executionModel: z.string().max(120).nullable().optional(),
+    plannerReasoningEffort: z.enum(["low", "medium", "high", "xhigh"]).optional(),
+    executionReasoningEffort: z.enum(["low", "medium", "high", "xhigh"]).optional(),
+    symphonyMaxConcurrentAgents: z.number().int().min(1).max(8).optional(),
+    symphonyMaxTurns: z.number().int().min(4).max(80).optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one project setting must be provided.",
+  });
 
 export async function DELETE(
   _request: Request,
@@ -39,26 +50,16 @@ export async function PATCH(
   try {
     const { projectId } = await context.params;
     const parsed = updateProjectSchema.parse(await request.json());
-    const project = updateProjectName(projectId, parsed.name);
+    const project = updateProjectSettings(projectId, parsed);
 
     if (!project) {
       return NextResponse.json({ error: "Project not found." }, { status: 404 });
     }
 
-    appendAuditEvent({
-      projectId,
-      actor: "control-plane",
-      action: "project.renamed",
-      detail: `Project renamed to ${project.name}.`,
-      payload: {
-        name: project.name,
-      },
-    });
-
     return NextResponse.json({
       ok: true,
       projectId,
-      name: project.name,
+      project,
     });
   } catch (error) {
     return NextResponse.json(
