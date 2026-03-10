@@ -272,6 +272,7 @@ function NextStepCard({
 
 function nextStepForProject({
   symphonyRunning,
+  symphonyStopped,
   openFindings,
   blockedIssues,
   waitingForSlots,
@@ -281,6 +282,7 @@ function nextStepForProject({
   activeIssues,
 }: {
   symphonyRunning: boolean;
+  symphonyStopped: boolean;
   openFindings: number;
   blockedIssues: number;
   waitingForSlots: number;
@@ -289,6 +291,15 @@ function nextStepForProject({
   releaseStatus: GateVerdict;
   activeIssues: number;
 }) {
+  if (symphonyStopped) {
+    return {
+      title: "The automated run stopped",
+      detail:
+        "Open the Live run tab to review the last runtime log, then restart the run when you are ready.",
+      tone: "warning" as const,
+    };
+  }
+
   if (!symphonyRunning) {
     return {
       title: "Start the automated run when you are ready",
@@ -390,11 +401,27 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
   const sanitizedBootstrapLog = snapshot.symphony?.bootstrapTail
     ? snapshot.symphony.bootstrapTail.map(stripAnsi).filter(Boolean)
     : [];
+  const latestSymphonyFailure = snapshot.auditEvents.find(
+    (event) => event.action === "symphony.start_failed",
+  );
+  const latestSymphonyStart = snapshot.auditEvents.find(
+    (event) => event.action === "symphony.started",
+  );
+  const hasPreviousRun = Boolean(snapshot.symphony);
+  const stoppedRuntime = hasPreviousRun && !snapshot.symphony?.running;
+  const lastStartFailed =
+    latestSymphonyFailure &&
+    (!latestSymphonyStart ||
+      new Date(latestSymphonyFailure.createdAt).getTime() >
+        new Date(latestSymphonyStart.createdAt).getTime())
+      ? latestSymphonyFailure
+      : null;
   const symphonyDashboardUrl = snapshot.symphony?.stateUrl
     ? snapshot.symphony.stateUrl.replace(/\/api\/v1\/state$/, "/")
     : null;
   const nextStep = nextStepForProject({
     symphonyRunning: Boolean(snapshot.symphony?.running),
+    symphonyStopped: stoppedRuntime,
     openFindings: openFindings.length,
     blockedIssues: blockedIssues.length,
     waitingForSlots: waitingForSlotQueue.length,
@@ -425,6 +452,12 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
   useEffect(() => {
     setNameDraft(snapshot.project.name);
   }, [snapshot.project.name]);
+
+  useEffect(() => {
+    if (snapshot.symphony?.running) {
+      setRunError(null);
+    }
+  }, [snapshot.symphony?.running]);
 
   function runExecution() {
     setRunning(true);
@@ -587,6 +620,8 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
         ? ("warning" as const)
         : snapshot.symphony?.running
           ? ("active" as const)
+          : stoppedRuntime
+            ? ("warning" as const)
           : ("upcoming" as const);
   const checksStepState =
     snapshot.gateStatus.releaseStatus === "pass"
@@ -600,12 +635,16 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
     ? retryProblemQueue.length
       ? "Needs attention"
       : "Running now"
-    : "Not started";
+    : stoppedRuntime
+      ? "Stopped"
+      : "Not started";
   const runStatusDetail = snapshot.symphony?.running
     ? retryProblemQueue.length
       ? "Some tickets are retrying after an error."
       : "Overture is polling the live Symphony run."
-    : "Review the plan and start the run when you are ready.";
+    : stoppedRuntime
+      ? "The last Symphony run stopped. Open Live run to review the last runtime details and restart it."
+      : "Review the plan and start the run when you are ready.";
 
   return (
     <div className="space-y-6">
@@ -693,12 +732,18 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
                     Main action
                   </p>
                   <h2 className="mt-3 text-2xl font-semibold text-[var(--color-ink)]">
-                    {snapshot.symphony?.running ? "Automated run is live" : "Ready to start"}
+                    {snapshot.symphony?.running
+                      ? "Automated run is live"
+                      : stoppedRuntime
+                        ? "Automated run stopped"
+                        : "Ready to start"}
                   </h2>
                   <p className="mt-2 text-sm leading-7 text-[var(--color-muted)]">
                     {snapshot.symphony?.running
                       ? "Overture is checking the Symphony run every few seconds and updating this page automatically."
-                      : "Nothing will start until you press the button below. You can review the plan first if you want."}
+                      : stoppedRuntime
+                        ? "The last run already started once and then stopped. Review the runtime details below, then restart the run when you are ready."
+                        : "Nothing will start until you press the button below. You can review the plan first if you want."}
                   </p>
                 </div>
                 <Rocket className="h-6 w-6 text-[var(--color-accent)]" />
@@ -720,10 +765,17 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
                     ? "Starting automated run..."
                     : snapshot.symphony?.running
                       ? "Refresh live run"
-                      : "Start automated run"}
+                      : stoppedRuntime
+                        ? "Restart automated run"
+                        : "Start automated run"}
                 </button>
               </div>
               {runError ? <p className="mt-3 text-sm text-[var(--color-danger)]">{runError}</p> : null}
+              {!runError && stoppedRuntime && lastStartFailed ? (
+                <p className="mt-3 text-sm text-[var(--color-danger)]">
+                  Last start issue: {lastStartFailed.detail}
+                </p>
+              ) : null}
               {deleteError ? (
                 <p className="mt-3 text-sm text-[var(--color-danger)]">{deleteError}</p>
               ) : null}
@@ -1003,9 +1055,38 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
                   ? `${retryProblemQueue.length} ticket${retryProblemQueue.length === 1 ? " is" : "s are"} retrying after an execution problem. Check the queue details below for the exact error.`
                   : snapshot.symphony?.running
                     ? "Symphony is actively working through the queued tickets."
-                    : "The automated run has not started yet. Press Start automated run when you are ready."}
+                    : stoppedRuntime
+                      ? "The last Symphony run stopped. Review the last startup log and runtime details below before restarting it."
+                      : "The automated run has not started yet. Press Start automated run when you are ready."}
             </p>
           </div>
+
+          {stoppedRuntime ? (
+            <div className="panel rounded-[30px] border border-amber-300/20 bg-amber-400/8 p-6">
+              <div className="flex items-start gap-4">
+                <AlertTriangle className="mt-1 h-5 w-5 text-[var(--color-warning)]" />
+                <div>
+                  <h2 className="text-2xl font-semibold text-[var(--color-ink)]">
+                    Last run stopped
+                  </h2>
+                  <p className="mt-2 text-sm leading-7 text-[var(--color-muted)]">
+                    Overture still has the previous runtime record, but Symphony is no longer
+                    responding on it.
+                  </p>
+                  {latestSymphonyFailure ? (
+                    <p className="mt-3 text-sm leading-7 text-[var(--color-muted)]">
+                      Last recorded start failure: {latestSymphonyFailure.detail}
+                    </p>
+                  ) : null}
+                  {sanitizedBootstrapLog.length ? (
+                    <p className="mt-3 text-sm leading-7 text-[var(--color-muted)]">
+                      Latest runtime log: {sanitizedBootstrapLog[0]}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          ) : null}
 
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <MetricCard
@@ -1160,7 +1241,7 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
                   <p className="font-semibold text-[var(--color-ink)]">PID / Port</p>
                   <p className="mt-2">
                     {snapshot.symphony
-                      ? `${snapshot.symphony.pid} / ${snapshot.symphony.port}`
+                      ? `${snapshot.symphony.pid} / ${snapshot.symphony.port}${snapshot.symphony.running ? "" : " (stopped)"}`
                       : "Not started"}
                   </p>
                 </div>

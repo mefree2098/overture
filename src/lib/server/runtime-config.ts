@@ -9,6 +9,7 @@ import { getWorkspaceRoot } from "@/lib/server/storage";
 
 const DEFAULT_SYMPHONY_TRACKER_TOKEN = "overture-symphony-local-token";
 const BUNDLED_CODEX_PATH = "/Applications/Codex.app/Contents/Resources/codex";
+const LEGACY_DEFAULT_REPO_SOURCE = "/workspace/project";
 
 function isExecutable(filePath: string) {
   try {
@@ -141,10 +142,38 @@ export function getSymphonyTrackerToken() {
   return process.env.SYMPHONY_TRACKER_TOKEN?.trim() || DEFAULT_SYMPHONY_TRACKER_TOKEN;
 }
 
+function sanitizeInternalOrigin(origin: string) {
+  try {
+    const url = new URL(origin);
+
+    if (["0.0.0.0", "::", "[::]", "localhost"].includes(url.hostname)) {
+      url.hostname = "127.0.0.1";
+    }
+
+    return url.origin;
+  } catch {
+    return origin;
+  }
+}
+
+export function getInternalControlPlaneOrigin(candidateOrigin?: string) {
+  const configured =
+    process.env.OVERTURE_INTERNAL_ORIGIN?.trim() ||
+    process.env.OVERTURE_ORIGIN?.trim() ||
+    candidateOrigin?.trim() ||
+    `http://127.0.0.1:${process.env.PORT?.trim() || "3000"}`;
+
+  return sanitizeInternalOrigin(configured);
+}
+
 export function normalizeRepoSource(repoSource: string) {
   const trimmed = repoSource.trim();
 
   if (!trimmed || trimmed === ".") {
+    return getWorkspaceRoot();
+  }
+
+  if (trimmed === LEGACY_DEFAULT_REPO_SOURCE && !existsSync(trimmed)) {
     return getWorkspaceRoot();
   }
 

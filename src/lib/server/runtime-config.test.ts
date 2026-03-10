@@ -69,4 +69,21 @@ describe("runtime-config", () => {
     expect(support.localChatgptAvailable).toBe(true);
     expect(support.recommendedExecutionMode).toBe("local_chatgpt");
   });
+
+  it("maps the legacy default repo source to the current workspace root", async () => {
+    const runtimeConfig = await import("@/lib/server/runtime-config");
+
+    expect(runtimeConfig.normalizeRepoSource("/workspace/project")).toBe(process.cwd());
+  });
+
+  it("normalizes internal origins so Symphony targets loopback instead of bind addresses", async () => {
+    const runtimeConfig = await import("@/lib/server/runtime-config");
+
+    expect(runtimeConfig.getInternalControlPlaneOrigin("http://0.0.0.0:3000")).toBe(
+      "http://127.0.0.1:3000",
+    );
+    expect(runtimeConfig.getInternalControlPlaneOrigin("http://localhost:3100")).toBe(
+      "http://127.0.0.1:3100",
+    );
+  });
 });

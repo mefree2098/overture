@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Sparkles, Wand2 } from "lucide-react";
 import { ProjectCard } from "@/components/project-card";
 import { ProjectCreateForm } from "@/components/project-create-form";
+import { getCodexModelOptions } from "@/lib/model-catalog";
 import { getAppSettings } from "@/lib/server/app-settings";
 import { listProjects } from "@/lib/server/repository";
 import { getExecutionModeSupport } from "@/lib/server/runtime-config";
@@ -12,6 +13,10 @@ export default function HomePage() {
   const projects = listProjects();
   const appSettings = getAppSettings();
   const executionSupport = getExecutionModeSupport();
+  const modelOptions = getCodexModelOptions([
+    appSettings.plannerModel,
+    appSettings.executionModel,
+  ]);
   const projectSummary = {
     projects: projects.length,
     inProgress: projects.filter(
@@ -176,6 +181,7 @@ export default function HomePage() {
       <ProjectCreateForm
         executionSupport={executionSupport}
         appSettings={appSettings}
+        modelOptions={modelOptions}
       />
 
       <section className="space-y-4">

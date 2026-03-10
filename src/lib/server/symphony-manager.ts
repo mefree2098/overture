@@ -3,10 +3,10 @@ import { constants as fsConstants } from "node:fs";
 import { accessSync, openSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   getSymphonyTrackerToken,
   normalizeRepoSource,
-  repoSourceForGitClone,
   resolveCodexBin,
 } from "@/lib/server/runtime-config";
 import type { ProjectRecord, SymphonyRuntimeRecord } from "@/lib/types";
@@ -77,6 +77,41 @@ function runtimePaths(projectSlug: string) {
   };
 }
 
+function buildWorkspaceBootstrapCommand(repoSource: string) {
+  if (
+    repoSource.startsWith("http://") ||
+    repoSource.startsWith("https://") ||
+    repoSource.startsWith("ssh://") ||
+    repoSource.startsWith("git@")
+  ) {
+    return `git clone --depth 1 ${shellQuote(repoSource)} .`;
+  }
+
+  if (repoSource.startsWith("file://")) {
+    return `git clone --depth 1 ${shellQuote(repoSource)} .`;
+  }
+
+  const sourcePath = path.resolve(repoSource);
+  const sourceGitUrl = pathToFileURL(sourcePath).toString();
+
+  return [
+    `SOURCE_PATH=${shellQuote(sourcePath)}`,
+    `if [ -d "$SOURCE_PATH/.git" ]; then`,
+    `  git clone --depth 1 ${shellQuote(sourceGitUrl)} .`,
+    "else",
+    "  tar \\",
+    '    --exclude=".git" \\',
+    '    --exclude=".overture" \\',
+    '    --exclude=".overture-e2e" \\',
+    '    --exclude=".next" \\',
+    '    --exclude="node_modules" \\',
+    '    --exclude="playwright-report" \\',
+    '    --exclude="test-results" \\',
+    '    -C "$SOURCE_PATH" -cf - . | tar -xf -',
+    "fi",
+  ].join("\n");
+}
+
 function processIsRunning(pid: number) {
   try {
     process.kill(pid, 0);
@@ -136,7 +171,8 @@ function buildWorkflow(
   workflowPath: string,
 ) {
   const workspaceRoot = getProjectWorkspaceRoot(project.slug);
-  const repoSource = repoSourceForGitClone(normalizeRepoSource(project.repoSource));
+  const repoSource = normalizeRepoSource(project.repoSource);
+  const workspaceBootstrapCommand = buildWorkspaceBootstrapCommand(repoSource);
   const codexBin = resolveCodexBin();
   const codexCommand = [
     shellQuote(codexBin),
@@ -162,7 +198,7 @@ function buildWorkflow(
     `  root: ${JSON.stringify(workspaceRoot)}`,
     "hooks:",
     "  after_create: |",
-    `    git clone --depth 1 ${shellQuote(repoSource)} .`,
+    ...workspaceBootstrapCommand.split("\n").map((line) => `    ${line}`),
     "agent:",
     `  max_concurrent_agents: ${project.symphonyMaxConcurrentAgents}`,
     `  max_turns: ${project.symphonyMaxTurns}`,
@@ -231,6 +267,54 @@ async function readLogTail(filePath: string, maxLines = 24) {
   }
 }
 
+async function fetchStateSnapshot(stateUrl: string) {
+  try {
+    const response = await fetch(stateUrl, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(1500),
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    return (await response.json()) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+async function requestSymphonyShutdown(stateUrl: string) {
+  const shutdownUrl = stateUrl.replace(/\/api\/v1\/state$/, "/api/v1/shutdown");
+
+  try {
+    const response = await fetch(shutdownUrl, {
+      method: "POST",
+      signal: AbortSignal.timeout(1500),
+    });
+
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function waitForSymphonyShutdown(stateUrl: string) {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < 10000) {
+    const state = await fetchStateSnapshot(stateUrl);
+
+    if (!state) {
+      return;
+    }
+
+    await new Promise((resolve) => {
+      setTimeout(resolve, 250);
+    });
+  }
+}
+
 async function writeWorkflow(project: ProjectRecord, origin: string) {
   const paths = runtimePaths(project.slug);
   await mkdir(paths.runtimeRoot, { recursive: true });
@@ -265,17 +349,10 @@ async function waitForSymphonyReady(runtime: {
   const startedAt = Date.now();
 
   while (Date.now() - startedAt < 20000) {
-    if (!processIsRunning(runtime.pid)) {
-      break;
-    }
+    const state = await fetchStateSnapshot(stateUrl);
 
-    try {
-      const response = await fetch(stateUrl, { cache: "no-store" });
-      if (response.ok) {
-        return;
-      }
-    } catch {
-      // Keep waiting for the observability server.
+    if (state) {
+      return;
     }
 
     await new Promise((resolve) => {
@@ -301,21 +378,10 @@ export async function getSymphonyRuntime(projectSlug: string) {
     return null;
   }
 
-  const running = processIsRunning(runtime.pid);
   const stateUrl = `http://127.0.0.1:${runtime.port}/api/v1/state`;
-  let state: Record<string, unknown> | null = null;
+  const state = await fetchStateSnapshot(stateUrl);
   const bootstrapTail = await readLogTail(runtime.bootstrapLogPath);
-
-  if (running) {
-    try {
-      const response = await fetch(stateUrl, { cache: "no-store" });
-      if (response.ok) {
-        state = (await response.json()) as Record<string, unknown>;
-      }
-    } catch {
-      state = null;
-    }
-  }
+  const running = Boolean(state) || processIsRunning(runtime.pid);
 
   return {
     ...runtime,
@@ -417,13 +483,21 @@ async function stopRuntimeProcess(pid: number) {
 }
 
 export async function stopSymphonyForProject(projectSlug: string) {
-  const runtime = await readRuntimeFile(projectSlug);
+  const runtime = await getSymphonyRuntime(projectSlug);
   const { projectRoot } = getProjectPaths(projectSlug);
   const runtimeFilePath = path.join(projectRoot, "symphony", "runtime.json");
 
   if (!runtime) {
     await rm(runtimeFilePath, { force: true });
     return { stopped: false };
+  }
+
+  if (runtime.running) {
+    const shutdownQueued = await requestSymphonyShutdown(runtime.stateUrl);
+
+    if (shutdownQueued) {
+      await waitForSymphonyShutdown(runtime.stateUrl);
+    }
   }
 
   if (runtime.pid > 0 && processIsRunning(runtime.pid)) {

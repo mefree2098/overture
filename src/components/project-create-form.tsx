@@ -1,5 +1,6 @@
 "use client";
 
+import { CodexModelSelect } from "@/components/codex-model-select";
 import Link from "next/link";
 import { startTransition, useDeferredValue, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -11,6 +12,7 @@ import {
   Settings2,
   Sparkles,
 } from "lucide-react";
+import type { CodexModelOption } from "@/lib/model-catalog";
 import { extractOutline } from "@/lib/spec-outline";
 import type {
   AppSettingsRecord,
@@ -51,6 +53,7 @@ function modeLabel(mode: ExecutionMode) {
 export function ProjectCreateForm({
   executionSupport,
   appSettings,
+  modelOptions,
 }: {
   executionSupport: {
     codexCliAvailable: boolean;
@@ -60,6 +63,7 @@ export function ProjectCreateForm({
     recommendedExecutionMode: ExecutionMode;
   };
   appSettings: AppSettingsRecord;
+  modelOptions: CodexModelOption[];
 }) {
   const router = useRouter();
   const initialExecutionMode = useMemo(() => {
@@ -353,13 +357,16 @@ export function ProjectCreateForm({
                   Planning model
                 </span>
                 <p className="text-sm leading-6 text-[var(--color-muted)]">
-                  Leave blank to use the saved default model from Settings.
+                  Choose an explicit planning model or leave this on `Codex default`.
                 </p>
-                <input
+                <CodexModelSelect
+                  id="project-planner-model"
+                  name="plannerModel"
                   value={plannerModel}
-                  onChange={(event) => setPlannerModel(event.target.value)}
-                  placeholder="Optional"
-                  className="glass-input w-full rounded-[22px] px-4 py-3"
+                  onChange={setPlannerModel}
+                  options={modelOptions}
+                  defaultLabel="Codex default"
+                  defaultDescription="Use the saved default planning model from Settings."
                 />
               </label>
 
@@ -368,13 +375,16 @@ export function ProjectCreateForm({
                   Execution model
                 </span>
                 <p className="text-sm leading-6 text-[var(--color-muted)]">
-                  Leave blank to use the saved default model from Settings.
+                  Choose an explicit execution model or leave this on `Codex default`.
                 </p>
-                <input
+                <CodexModelSelect
+                  id="project-execution-model"
+                  name="executionModel"
                   value={executionModel}
-                  onChange={(event) => setExecutionModel(event.target.value)}
-                  placeholder="Optional"
-                  className="glass-input w-full rounded-[22px] px-4 py-3"
+                  onChange={setExecutionModel}
+                  options={modelOptions}
+                  defaultLabel="Codex default"
+                  defaultDescription="Use the saved default execution model from Settings."
                 />
               </label>
 

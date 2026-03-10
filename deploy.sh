@@ -20,7 +20,8 @@ case "$MODE" in
     export OVERTURE_CODEX_AUTH_SOURCE_DIR="$HOST_CODEX_HOME"
     docker compose up --build -d
     echo "Overture is starting on http://127.0.0.1:3000"
-    echo "Runtime data is bind-mounted to $ROOT_DIR/.overture"
+    echo "Project artifacts and runtime files stay under $ROOT_DIR/.overture"
+    echo "SQLite data and active Symphony workspaces now live in Docker-managed volumes for stability."
     echo "The Docker image now bootstraps Codex CLI, Symphony dependencies, and ChatGPT-backed Codex auth automatically."
     echo "Project and model defaults can be adjusted in the UI at http://127.0.0.1:3000/settings"
     echo "Health probe: curl http://127.0.0.1:3000/api/health"

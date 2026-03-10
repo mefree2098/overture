@@ -9,6 +9,7 @@ services:
       - .env
     environment:
       OVERTURE_BIND_HOST: 0.0.0.0
+      OVERTURE_INTERNAL_ORIGIN: http://127.0.0.1:3000
       PORT: 3000
       OVERTURE_ROOT: /app
       CODEX_HOME: /app/.overture/codex-home
@@ -16,4 +17,11 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     volumes:
       - ./.overture:/app/.overture
+      - ./.overture/data:/app/.overture-host-data:ro
+      - overture_data:/app/.overture/data
+      - overture_workspaces:/app/.overture/workspaces
       - ${OVERTURE_CODEX_AUTH_SOURCE_DIR:-${HOME}/.codex}:/codex-host:ro
+
+volumes:
+  overture_data:
+  overture_workspaces:

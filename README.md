@@ -31,7 +31,7 @@ The automated local container deployment includes the Codex CLI, `git`, the Elix
 
 Model selection works like this:
 
-- If you leave the planner or execution model blank, Overture lets the Codex CLI choose its default model
+- If you leave the planner or execution model on `Codex default`, Overture lets the Codex CLI choose its default model
 - If you want explicit control, set default model names in `/settings`
 - If one project needs different model choices, open `Advanced project options` in the intake form and override them there
 
@@ -82,7 +82,7 @@ Common variables:
 
 - `CONTROL_PLANE_TRACKER_TOKEN`: token accepted by the tracker shim
 - `SYMPHONY_TRACKER_TOKEN`: token used by Symphony against the tracker shim
-- `NEXT_PUBLIC_DEFAULT_REPO`: default repo source shown in intake
+- `NEXT_PUBLIC_DEFAULT_REPO`: default repo source shown in intake. For local Docker deployment this should normally stay `.` so Overture targets the checked-out app workspace.
 - `OPENAI_API_KEY`: optional; only needed if you intentionally use `hosted_api`
 - `PORT`: app port
 - `OVERTURE_BIND_HOST`: bind host for `npm run start`
@@ -93,6 +93,7 @@ Common variables:
 - `OVERTURE_SYMPHONY_BIN`: optional Symphony binary override
 - `OVERTURE_SYMPHONY_PORT_BASE`: base port used for per-project Symphony runtimes
 - `OVERTURE_ORIGIN`: override origin used by the runner script
+- `OVERTURE_INTERNAL_ORIGIN`: optional internal loopback origin used by Symphony when it talks back to the control plane
 
 ## Native quick start
 
@@ -133,7 +134,9 @@ What this does:
 
 - Builds the Docker image with the Codex CLI and Symphony dependencies included
 - Mounts your host Codex auth into the container
-- Persists runtime state under `.overture`
+- Keeps project artifacts and runtime files under `.overture`
+- Stores the live SQLite database and active Symphony workspaces in Docker-managed volumes instead of the macOS bind mount
+- Migrates an existing host `.overture/data/overture.db*` into the Docker data volume on first launch
 - Starts the app on port `3000`
 
 Quick health check:
@@ -146,8 +149,8 @@ curl http://127.0.0.1:3000/api/health
 
 Open `/settings` in the UI to control:
 
-- Default planner model
-- Default execution model
+- Default planner model from the built-in Codex model dropdown
+- Default execution model from the built-in Codex model dropdown
 - Planner reasoning depth
 - Default execution mode
 - Default repository source
@@ -155,6 +158,8 @@ Open `/settings` in the UI to control:
 - Symphony parallelism and max-turn limits
 
 These settings apply to new projects only. Existing projects keep the planner/execution settings captured when they were created.
+
+If you leave either model on `Codex default`, Overture lets the installed Codex CLI choose the runtime default. Otherwise you can pick from the current built-in Codex model catalog in the dropdown.
 
 Existing projects can also be renamed from the project page under `Project settings and options`.
 
@@ -266,7 +271,8 @@ The local Docker setup now:
 - Installs the Codex CLI automatically
 - Installs `git` and the Elixir runtime needed by Symphony
 - Includes the vendored Symphony runtime
-- Binds `.overture` from the host into `/app/.overture`
+- Keeps host-visible artifacts and runtime files under `.overture`
+- Moves the live SQLite database and active Symphony workspaces into Docker-managed volumes
 - Persists Codex auth under `/app/.overture/codex-home`
 - Copies host ChatGPT Codex auth into the container automatically
 - Exposes the app at [http://127.0.0.1:3000](http://127.0.0.1:3000)
@@ -283,11 +289,13 @@ If the host machine is not already logged into Codex, `deploy.sh local` now fail
 
 Default runtime directories:
 
-- `.overture/data/overture.db`: canonical SQLite database
+- Native runs: `.overture/data/overture.db` is the canonical SQLite database
+- Docker runs: the canonical SQLite database is stored in the `overture_data` Docker volume and imported from host `.overture/data/overture.db*` on first boot if present
 - `.overture/artifacts`: immutable evidence files
 - `.overture/codex-home`: persisted Codex CLI auth and local Codex state for containerized runs
 - `.overture/projects`: per-project workflow contracts and Symphony runtime files
-- `.overture/workspaces`: per-project cloned workspaces used by Symphony
+- Native runs: `.overture/workspaces` holds per-project cloned workspaces used by Symphony
+- Docker runs: active Symphony workspaces live in the `overture_workspaces` Docker volume for stability
 - `.overture-e2e`: isolated Playwright runtime root
 
 `OVERTURE_ROOT` changes where `.overture` is created, but source resolution still points at the actual app repository root.
@@ -295,7 +303,7 @@ Default runtime directories:
 ## Deployment assets
 
 - `Dockerfile`: local production image
-- `docker-compose.yml`: local container orchestration with a shared `.overture` bind mount
+- `docker-compose.yml`: local container orchestration with shared host artifacts plus Docker-managed data/workspace volumes
 - `deploy.sh`: helper for local, Jetson, Azure, and AWS deployment entrypoints
 - `infra/jetson/README.md`: Jetson deployment notes
 - `infra/azure/main.bicep`: Azure baseline container-hosting asset that still needs a real Codex auth strategy before live execution

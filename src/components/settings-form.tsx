@@ -1,6 +1,8 @@
 "use client";
 
 import { startTransition, useState } from "react";
+import { CodexModelSelect } from "@/components/codex-model-select";
+import type { CodexModelOption } from "@/lib/model-catalog";
 import { CheckCircle2, LoaderCircle, Settings2, Sparkles } from "lucide-react";
 import type { AppSettingsRecord, ExecutionMode, PlannerReasoningEffort } from "@/lib/types";
 
@@ -31,6 +33,7 @@ function supportLabel(
 export function SettingsForm({
   initialSettings,
   executionSupport,
+  modelOptions,
 }: {
   initialSettings: AppSettingsRecord;
   executionSupport: {
@@ -40,6 +43,7 @@ export function SettingsForm({
     hostedApiAvailable: boolean;
     recommendedExecutionMode: ExecutionMode;
   };
+  modelOptions: CodexModelOption[];
 }) {
   const [plannerModel, setPlannerModel] = useState(initialSettings.plannerModel ?? "");
   const [executionModel, setExecutionModel] = useState(initialSettings.executionModel ?? "");
@@ -121,8 +125,8 @@ export function SettingsForm({
               Choose how Overture plans and runs projects.
             </h1>
             <p className="max-w-3xl text-base leading-8 text-[var(--color-muted)]">
-              These settings become the starting point for every new project. You can leave model
-              names blank to let Codex choose its default automatically.
+              These settings become the starting point for every new project. Leave a model on
+              `Codex default` if you want the CLI to choose automatically.
             </p>
           </div>
 
@@ -134,11 +138,14 @@ export function SettingsForm({
               <p className="text-sm leading-6 text-[var(--color-muted)]">
                 The model Codex should use when turning a plan into milestones and tickets.
               </p>
-              <input
+              <CodexModelSelect
+                id="planner-model"
+                name="plannerModel"
                 value={plannerModel}
-                onChange={(event) => setPlannerModel(event.target.value)}
-                placeholder="Leave blank to use the Codex default"
-                className="glass-input w-full rounded-[22px] px-4 py-3"
+                onChange={setPlannerModel}
+                options={modelOptions}
+                defaultLabel="Codex default"
+                defaultDescription="Let the Codex CLI choose its own default planning model."
               />
             </label>
 
@@ -149,11 +156,14 @@ export function SettingsForm({
               <p className="text-sm leading-6 text-[var(--color-muted)]">
                 The model Symphony should use while working through project tickets.
               </p>
-              <input
+              <CodexModelSelect
+                id="execution-model"
+                name="executionModel"
                 value={executionModel}
-                onChange={(event) => setExecutionModel(event.target.value)}
-                placeholder="Leave blank to use the Codex default"
-                className="glass-input w-full rounded-[22px] px-4 py-3"
+                onChange={setExecutionModel}
+                options={modelOptions}
+                defaultLabel="Codex default"
+                defaultDescription="Let the Codex CLI choose its own default execution model."
               />
             </label>
 
@@ -367,10 +377,10 @@ export function SettingsForm({
               </p>
             </div>
             <div className="rounded-[22px] border border-white/8 bg-white/4 p-4">
-              <p className="font-semibold text-[var(--color-ink)]">Blank model fields</p>
+              <p className="font-semibold text-[var(--color-ink)]">Model dropdowns</p>
               <p className="mt-2">
-                If you leave a model blank, Overture does not force one and lets the Codex CLI pick
-                its own default.
+                If you leave the dropdown on `Codex default`, Overture does not force a model and
+                lets the Codex CLI pick its own default.
               </p>
             </div>
             <div className="rounded-[22px] border border-white/8 bg-white/4 p-4">
