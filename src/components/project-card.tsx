@@ -68,6 +68,7 @@ export function ProjectCard({ summary }: { summary: ProjectSummary }) {
           </div>
           <Link
             href={`/projects/${summary.project.id}`}
+            prefetch={false}
             className="inline-flex items-center justify-center rounded-full border border-white/8 bg-white/4 p-3 text-[var(--color-muted)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
             aria-label={`Open ${summary.project.name}`}
           >
@@ -118,6 +119,7 @@ export function ProjectCard({ summary }: { summary: ProjectSummary }) {
       <div className="mt-6 flex flex-wrap items-center gap-3">
         <Link
           href={`/projects/${summary.project.id}`}
+          prefetch={false}
           className="glass-button inline-flex items-center gap-2 rounded-full px-5 py-3 text-sm font-semibold transition"
         >
           Open project

@@ -432,6 +432,10 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
   });
 
   useEffect(() => {
+    setSnapshot(initialSnapshot);
+  }, [initialSnapshot]);
+
+  useEffect(() => {
     const interval = window.setInterval(async () => {
       const response = await fetch(`/api/projects/${snapshot.project.id}/snapshot`, {
         cache: "no-store",
