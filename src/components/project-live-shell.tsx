@@ -2036,7 +2036,6 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
                       <th className="px-4 py-3">Launch</th>
                       <th className="px-4 py-3">Deploy</th>
                       <th className="px-4 py-3">Health</th>
-                      <th className="px-4 py-3">Perf</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2056,9 +2055,6 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
                         </td>
                         <td className="px-4 py-3">
                           <StatusPill status={row.health} />
-                        </td>
-                        <td className="px-4 py-3">
-                          <StatusPill status={row.perf} />
                         </td>
                       </tr>
                     ))}

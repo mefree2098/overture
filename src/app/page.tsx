@@ -6,7 +6,8 @@ import { ProjectCard } from "@/components/project-card";
 import { ProjectCreateForm } from "@/components/project-create-form";
 import { codexReasoningEffortLabel } from "@/lib/codex-reasoning";
 import { getCodexModelOptions } from "@/lib/model-catalog";
-import { deploymentTargetLabel } from "@/lib/project-pipeline";
+import { preferredResearchProvider } from "@/lib/research-provider-catalog";
+import { deploymentTargetLabel, researchProviderLabel } from "@/lib/project-pipeline";
 import { getAppSettings } from "@/lib/server/app-settings";
 import { listProjects } from "@/lib/server/repository";
 import { getExecutionModeSupport } from "@/lib/server/runtime-config";
@@ -19,6 +20,10 @@ export default function HomePage() {
     appSettings.plannerModel,
     appSettings.executionModel,
   ]);
+  const activeResearchProvider = preferredResearchProvider(
+    appSettings.defaultResearchProvider,
+    executionSupport.researchProviderAvailability,
+  );
   const projectSummary = {
     projects: projects.length,
     inProgress: projects.filter(
@@ -137,7 +142,7 @@ export default function HomePage() {
                   Research provider
                 </p>
                 <p className="mt-2 text-base text-[var(--color-ink)]">
-                  {appSettings.defaultResearchProvider}
+                  {researchProviderLabel(activeResearchProvider)}
                 </p>
               </div>
               <div className="rounded-[24px] border border-white/8 bg-white/4 p-4">

@@ -4,6 +4,11 @@ import { accessSync, existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import {
+  isResearchProviderAvailable,
+  preferredResearchProvider,
+  type ResearchProviderAvailability,
+} from "@/lib/research-provider-catalog";
 import type { ExecutionMode } from "@/lib/types";
 import { getWorkspaceRoot } from "@/lib/server/storage";
 
@@ -126,15 +131,57 @@ export function recommendedExecutionMode(): ExecutionMode {
   return "hosted_api";
 }
 
-export function getExecutionModeSupport() {
-  const authMode = getCodexAuthMode();
+export function getResearchProviderAvailability(input?: {
+  authMode?: ReturnType<typeof getCodexAuthMode>;
+  cliAvailable?: boolean;
+  hostedApiAvailable?: boolean;
+}): ResearchProviderAvailability {
+  const authMode = input?.authMode ?? getCodexAuthMode();
+  const cliAvailable = input?.cliAvailable ?? codexCliAvailable();
+  const localChatgptAvailable = authMode === "chatgpt";
+  const hostedApiAvailable = input?.hostedApiAvailable ?? hasHostedApiCodexAuth();
 
   return {
-    codexCliAvailable: codexCliAvailable(),
+    codexNativeAvailable: cliAvailable && (localChatgptAvailable || hostedApiAvailable),
+    openaiResponsesAvailable: hasHostedApiKey(),
+  };
+}
+
+export function resolveAvailableResearchProvider(provider: "codex_native" | "openai_responses") {
+  return preferredResearchProvider(provider, getResearchProviderAvailability());
+}
+
+export function assertResearchProviderAvailable(
+  provider: "codex_native" | "openai_responses",
+) {
+  if (provider === "codex_native") {
+    return;
+  }
+
+  if (isResearchProviderAvailable(provider, getResearchProviderAvailability())) {
+    return;
+  }
+
+  throw new Error("OpenAI Responses research requires OPENAI_API_KEY.");
+}
+
+export function getExecutionModeSupport() {
+  const authMode = getCodexAuthMode();
+  const cliAvailable = codexCliAvailable();
+  const hostedApiAvailable = hasHostedApiCodexAuth();
+  const researchProviderAvailability = getResearchProviderAvailability({
+    authMode,
+    cliAvailable,
+    hostedApiAvailable,
+  });
+
+  return {
+    codexCliAvailable: cliAvailable,
     codexAuthMode: authMode,
     localChatgptAvailable: authMode === "chatgpt",
-    hostedApiAvailable: hasHostedApiCodexAuth(),
+    hostedApiAvailable,
     recommendedExecutionMode: recommendedExecutionMode(),
+    researchProviderAvailability,
   };
 }
 

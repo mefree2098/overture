@@ -233,6 +233,46 @@ export async function runProjectDeployment(input: {
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Deployment run failed.";
+    const summary = `Deployment failed for ${profile.label}: ${message}`;
+    const logTail = safeLogTail(logPath);
+
+    writeArtifact({
+      projectId: snapshot.project.id,
+      projectSlug: snapshot.project.slug,
+      kind: "deployment-report",
+      label: `${profile.label} deployment report`,
+      extension: "md",
+      mimeType: "text/markdown",
+      content: buildDeploymentReport({
+        projectName: snapshot.project.name,
+        profileLabel: profile.label,
+        command: profile.command,
+        cwd: profile.cwd,
+        summary,
+      }),
+      metadata: {
+        deployRunId: persistedRunId,
+        deployProfileId: profile.id,
+        failed: true,
+      },
+    });
+
+    if (logTail.trim()) {
+      writeArtifact({
+        projectId: snapshot.project.id,
+        projectSlug: snapshot.project.slug,
+        kind: "deployment-log",
+        label: `${profile.label} deployment log`,
+        extension: "log",
+        mimeType: "text/plain",
+        content: logTail,
+        metadata: {
+          deployRunId: persistedRunId,
+          deployProfileId: profile.id,
+          failed: true,
+        },
+      });
+    }
 
     failDeployRunRecord({
       deployRunId: persistedRunId,

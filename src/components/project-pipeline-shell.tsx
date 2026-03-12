@@ -753,7 +753,6 @@ export function ProjectPipelineShell({
                 >
                   <option value="cached">Cached search</option>
                   <option value="live">Live search</option>
-                  <option value="provider_fallback">Provider fallback</option>
                 </select>
               </label>
               <textarea

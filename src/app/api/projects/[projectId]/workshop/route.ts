@@ -7,7 +7,7 @@ import { finalizeWorkshopPrompt, sendWorkshopMessage } from "@/lib/server/prompt
 
 const workshopMessageSchema = z.object({
   message: z.string().min(1).max(8000),
-  searchMode: z.enum(["cached", "live", "provider_fallback"]).optional(),
+  searchMode: z.enum(["cached", "live"]).optional(),
   repoContext: z.string().max(2000).nullable().optional(),
 });
 

@@ -106,8 +106,9 @@ export function normalizeWorkshopSearchMode(
 ): WorkshopSearchMode {
   switch (value) {
     case "live":
-    case "provider_fallback":
       return value;
+    case "provider_fallback":
+      return "live";
     default:
       return "cached";
   }

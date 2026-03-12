@@ -20,7 +20,11 @@ import {
   appendProjectTokenUsageBySlug,
   hydrateStoredProjectTokenUsage,
 } from "@/lib/server/project-token-usage";
-import { normalizeRepoSource } from "@/lib/server/runtime-config";
+import {
+  assertResearchProviderAvailable,
+  normalizeRepoSource,
+  resolveAvailableResearchProvider,
+} from "@/lib/server/runtime-config";
 import { getContentHash } from "@/lib/server/spec-parser";
 import { stopSymphonyForProject } from "@/lib/server/symphony-manager";
 import {
@@ -913,6 +917,15 @@ function resolveProjectDefaults(
     | CreateProjectInput,
   appSettings = getAppSettings(),
 ) {
+  const researchProvider =
+    input.researchProvider === undefined
+      ? resolveAvailableResearchProvider(appSettings.defaultResearchProvider)
+      : normalizeResearchProvider(input.researchProvider);
+
+  if (input.researchProvider !== undefined) {
+    assertResearchProviderAvailable(researchProvider);
+  }
+
   const plannerModel =
     input.plannerModel === undefined
       ? appSettings.plannerModel
@@ -924,8 +937,7 @@ function resolveProjectDefaults(
 
   return {
     repoSource: normalizeRepoSource(input.repoSource),
-    researchProvider:
-      input.researchProvider ?? appSettings.defaultResearchProvider,
+    researchProvider,
     plannerModel,
     executionModel,
     plannerReasoningEffort:
@@ -2253,6 +2265,11 @@ export function updateProjectSettings(
   const nextResearchProvider = normalizeResearchProvider(
     updates.researchProvider ?? current.researchProvider,
   );
+
+  if (updates.researchProvider !== undefined) {
+    assertResearchProviderAvailable(nextResearchProvider);
+  }
+
   const nextPlannerModel = sanitizeOptionalModel(
     updates.plannerModel ?? current.plannerModel,
   );

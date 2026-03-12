@@ -45,6 +45,10 @@ describe("runtime-config", () => {
     expect(support.hostedApiAvailable).toBe(true);
     expect(support.localChatgptAvailable).toBe(false);
     expect(support.recommendedExecutionMode).toBe("hosted_api");
+    expect(support.researchProviderAvailability).toEqual({
+      codexNativeAvailable: true,
+      openaiResponsesAvailable: false,
+    });
   });
 
   it("prefers local_chatgpt when ChatGPT auth is present and no API-key auth exists", async () => {
@@ -68,6 +72,19 @@ describe("runtime-config", () => {
     expect(support.hostedApiAvailable).toBe(false);
     expect(support.localChatgptAvailable).toBe(true);
     expect(support.recommendedExecutionMode).toBe("local_chatgpt");
+    expect(support.researchProviderAvailability).toEqual({
+      codexNativeAvailable: true,
+      openaiResponsesAvailable: false,
+    });
+  });
+
+  it("reports OpenAI Responses availability only when OPENAI_API_KEY is present", async () => {
+    process.env.OPENAI_API_KEY = "sk-live-test";
+
+    const runtimeConfig = await import("@/lib/server/runtime-config");
+    const support = runtimeConfig.getExecutionModeSupport();
+
+    expect(support.researchProviderAvailability.openaiResponsesAvailable).toBe(true);
   });
 
   it("maps the legacy default repo source to the current workspace root", async () => {

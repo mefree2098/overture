@@ -122,6 +122,19 @@ describe("repository lifecycle", () => {
     expect(symphonyManager.stopSymphonyForProject).toHaveBeenCalledWith(created.slug);
   });
 
+  it("rejects explicitly unsupported research providers", async () => {
+    const repository = await import("@/lib/server/repository");
+
+    expect(() =>
+      repository.createDraftProject({
+        name: "Unavailable Research",
+        repoSource: ".",
+        executionMode: "local_chatgpt",
+        researchProvider: "openai_responses",
+      }),
+    ).toThrow("OpenAI Responses research requires OPENAI_API_KEY.");
+  });
+
   it("updates a project's stored name without changing its slug", async () => {
     const repository = await import("@/lib/server/repository");
 

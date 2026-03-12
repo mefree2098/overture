@@ -70,7 +70,6 @@ describe("operational proof rows", () => {
         launch: "pass",
         deploy: "pass",
         health: "pass",
-        perf: "waived",
       }),
       expect.objectContaining({
         target: "aws",
@@ -78,7 +77,6 @@ describe("operational proof rows", () => {
         launch: "waived",
         deploy: "partial",
         health: "waived",
-        perf: "waived",
       }),
     ]);
   });

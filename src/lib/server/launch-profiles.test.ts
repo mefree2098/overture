@@ -100,5 +100,23 @@ describe("detectOperationalProfiles", () => {
     expect(simulatorLaunch?.command).toContain('-workspace "PenPal.xcworkspace"');
     expect(simulatorLaunch?.command).not.toContain("-project");
     expect(testflightDeploy?.command).toContain('-workspace "PenPal.xcworkspace"');
+    expect(testflightDeploy?.command).toContain('-scheme "PenPal"');
+  });
+
+  it("uses the repository package manager for launch script commands", () => {
+    writeFileSync(
+      path.join(repoRoot, "package.json"),
+      JSON.stringify({
+        dependencies: { next: "16.1.6", react: "19.0.0" },
+        scripts: { dev: "next dev" },
+      }),
+      "utf8",
+    );
+    writeFileSync(path.join(repoRoot, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n", "utf8");
+
+    const detected = detectOperationalProfiles(makeProject(repoRoot));
+    const webLaunch = detected.launchProfiles.find((profile) => profile.target === "web");
+
+    expect(webLaunch?.command).toBe("pnpm run dev");
   });
 });

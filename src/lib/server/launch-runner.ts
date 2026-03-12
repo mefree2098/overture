@@ -438,6 +438,69 @@ export async function runProjectLaunch(input: {
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Launch run failed.";
+    const summary = `Launch failed for ${profile.label}: ${message}`;
+    const logTail = safeReadLogTail(logPath);
+    const dockerDiagnostics = composeDiagnostics({
+      target: profile.target,
+      cwd: profile.cwd,
+    });
+
+    writeArtifact({
+      projectId: snapshot.project.id,
+      projectSlug: snapshot.project.slug,
+      kind: "launch-report",
+      label: `${profile.label} launch report`,
+      extension: "md",
+      mimeType: "text/markdown",
+      content: buildLaunchReport({
+        projectName: snapshot.project.name,
+        profileLabel: profile.label,
+        command: profile.command,
+        cwd: profile.cwd,
+        managedUrl,
+        summary,
+        pid: launchedPid,
+      }),
+      metadata: {
+        launchRunId: persistedRunId,
+        launchProfileId: profile.id,
+        failed: true,
+      },
+    });
+
+    if (logTail.trim()) {
+      writeArtifact({
+        projectId: snapshot.project.id,
+        projectSlug: snapshot.project.slug,
+        kind: "launch-log",
+        label: `${profile.label} launch log`,
+        extension: "log",
+        mimeType: "text/plain",
+        content: logTail,
+        metadata: {
+          launchRunId: persistedRunId,
+          launchProfileId: profile.id,
+          failed: true,
+        },
+      });
+    }
+
+    if (dockerDiagnostics?.trim()) {
+      writeArtifact({
+        projectId: snapshot.project.id,
+        projectSlug: snapshot.project.slug,
+        kind: "launch-diagnostics",
+        label: `${profile.label} diagnostics`,
+        extension: "log",
+        mimeType: "text/plain",
+        content: dockerDiagnostics,
+        metadata: {
+          launchRunId: persistedRunId,
+          launchProfileId: profile.id,
+          failed: true,
+        },
+      });
+    }
 
     failLaunchRunRecord({
       launchRunId: persistedRunId,

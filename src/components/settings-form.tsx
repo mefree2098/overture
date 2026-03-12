@@ -11,6 +11,7 @@ import {
   getCodexReasoningEffortOptions,
 } from "@/lib/codex-reasoning";
 import type { CodexModelOption } from "@/lib/model-catalog";
+import { preferredResearchProvider } from "@/lib/research-provider-catalog";
 import { CheckCircle2, LoaderCircle, Settings2, Sparkles } from "lucide-react";
 import type {
   AppSettingsRecord,
@@ -26,6 +27,10 @@ function supportLabel(
     localChatgptAvailable: boolean;
     hostedApiAvailable: boolean;
     recommendedExecutionMode: ExecutionMode;
+    researchProviderAvailability: {
+      codexNativeAvailable: boolean;
+      openaiResponsesAvailable: boolean;
+    };
   },
 ) {
   if (!executionSupport.codexCliAvailable) {
@@ -55,6 +60,10 @@ export function SettingsForm({
     localChatgptAvailable: boolean;
     hostedApiAvailable: boolean;
     recommendedExecutionMode: ExecutionMode;
+    researchProviderAvailability: {
+      codexNativeAvailable: boolean;
+      openaiResponsesAvailable: boolean;
+    };
   };
   modelOptions: CodexModelOption[];
 }) {
@@ -65,7 +74,10 @@ export function SettingsForm({
   const [executionReasoningEffort, setExecutionReasoningEffort] =
     useState<CodexReasoningEffort>(initialSettings.executionReasoningEffort);
   const [defaultResearchProvider, setDefaultResearchProvider] = useState<ResearchProvider>(
-    initialSettings.defaultResearchProvider,
+    preferredResearchProvider(
+      initialSettings.defaultResearchProvider,
+      executionSupport.researchProviderAvailability,
+    ),
   );
   const [defaultExecutionMode, setDefaultExecutionMode] = useState<ExecutionMode>(
     initialSettings.defaultExecutionMode,
@@ -93,6 +105,12 @@ export function SettingsForm({
   const [error, setError] = useState<string | null>(null);
   const plannerReasoningOptions = getCodexReasoningEffortOptions(plannerModel);
   const executionReasoningOptions = getCodexReasoningEffortOptions(executionModel);
+
+  useEffect(() => {
+    setDefaultResearchProvider((current) =>
+      preferredResearchProvider(current, executionSupport.researchProviderAvailability),
+    );
+  }, [executionSupport.researchProviderAvailability]);
 
   useEffect(() => {
     if (
@@ -268,6 +286,7 @@ export function SettingsForm({
                 id="default-research-provider"
                 name="defaultResearchProvider"
                 value={defaultResearchProvider}
+                availability={executionSupport.researchProviderAvailability}
                 onChange={setDefaultResearchProvider}
               />
             </label>

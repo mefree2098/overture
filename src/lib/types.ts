@@ -30,7 +30,7 @@ export type TrackerStateName = (typeof TRACKER_STATE_NAMES)[number];
 export type ExecutionMode = "local_chatgpt" | "hosted_api";
 export type GateVerdict = "pass" | "fail" | "pending" | "waived" | "partial";
 export type CodexReasoningEffort = (typeof CODEX_REASONING_EFFORTS)[number];
-export type WorkshopSearchMode = "cached" | "live" | "provider_fallback";
+export type WorkshopSearchMode = "cached" | "live";
 
 export interface PolicyProfile {
   qaStrictness: number;

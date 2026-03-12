@@ -60,4 +60,14 @@ describe("app settings", () => {
     expect(updated.symphonyMaxConcurrentAgents).toBe(4);
     expect(updated.symphonyMaxTurns).toBe(36);
   });
+
+  it("rejects unsupported research providers for the current environment", async () => {
+    const settingsModule = await import("@/lib/server/app-settings");
+
+    expect(() =>
+      settingsModule.updateAppSettings({
+        defaultResearchProvider: "openai_responses",
+      }),
+    ).toThrow("OpenAI Responses research requires OPENAI_API_KEY.");
+  });
 });

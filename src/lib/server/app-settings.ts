@@ -1,6 +1,7 @@
 import { DEFAULT_APP_SETTINGS } from "@/lib/constants";
 import { normalizeCodexReasoningEffort } from "@/lib/codex-reasoning";
 import { normalizeDeploymentTargets, normalizeResearchProvider } from "@/lib/project-pipeline";
+import { assertResearchProviderAvailable } from "@/lib/server/runtime-config";
 import { getDb } from "@/lib/server/db";
 import type { AppSettingsRecord, ExecutionMode } from "@/lib/types";
 
@@ -215,6 +216,11 @@ export function updateAppSettings(
       80,
     ),
   } satisfies Omit<AppSettingsRecord, "createdAt" | "updatedAt" | "defaults">;
+
+  if (updates.defaultResearchProvider !== undefined) {
+    assertResearchProviderAvailable(next.defaultResearchProvider);
+  }
+
   const timestamp = nowIso();
 
   db.prepare(

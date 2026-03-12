@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import type { CodexModelOption } from "@/lib/model-catalog";
 import { getCodexReasoningEffortOptions } from "@/lib/codex-reasoning";
+import { preferredResearchProvider } from "@/lib/research-provider-catalog";
 import { extractOutline } from "@/lib/spec-outline";
 import type {
   AppSettingsRecord,
@@ -64,8 +65,6 @@ function searchModeLabel(mode: WorkshopSearchMode) {
   switch (mode) {
     case "live":
       return "Live search";
-    case "provider_fallback":
-      return "Provider fallback";
     default:
       return "Cached search";
   }
@@ -82,6 +81,10 @@ export function ProjectCreateForm({
     localChatgptAvailable: boolean;
     hostedApiAvailable: boolean;
     recommendedExecutionMode: ExecutionMode;
+    researchProviderAvailability: {
+      codexNativeAvailable: boolean;
+      openaiResponsesAvailable: boolean;
+    };
   };
   appSettings: AppSettingsRecord;
   modelOptions: CodexModelOption[];
@@ -101,7 +104,10 @@ export function ProjectCreateForm({
   );
   const [executionMode, setExecutionMode] = useState<ExecutionMode>(initialExecutionMode);
   const [researchProvider, setResearchProvider] = useState<ResearchProvider>(
-    appSettings.defaultResearchProvider,
+    preferredResearchProvider(
+      appSettings.defaultResearchProvider,
+      executionSupport.researchProviderAvailability,
+    ),
   );
   const [qaStrictness, setQaStrictness] = useState(appSettings.defaultQaStrictness);
   const [securityStrictness, setSecurityStrictness] = useState(
@@ -133,6 +139,12 @@ export function ProjectCreateForm({
   const outline = extractOutline(deferredSpecText);
   const plannerReasoningOptions = getCodexReasoningEffortOptions(plannerModel);
   const executionReasoningOptions = getCodexReasoningEffortOptions(executionModel);
+
+  useEffect(() => {
+    setResearchProvider((current) =>
+      preferredResearchProvider(current, executionSupport.researchProviderAvailability),
+    );
+  }, [executionSupport.researchProviderAvailability]);
 
   useEffect(() => {
     if (
@@ -562,6 +574,7 @@ export function ProjectCreateForm({
                   id="project-research-provider"
                   name="researchProvider"
                   value={researchProvider}
+                  availability={executionSupport.researchProviderAvailability}
                   onChange={setResearchProvider}
                 />
               </label>
@@ -599,8 +612,8 @@ export function ProjectCreateForm({
                     Workshop search mode
                   </span>
                   <p className="text-sm leading-6 text-[var(--color-muted)]">
-                    Choose whether the Prompt Workshop should stay on cached search, use live
-                    search, or fall back to other configured providers.
+                    Choose whether the Prompt Workshop should stay on cached search or use live
+                    web search.
                   </p>
                   <select
                     value={workshopSearchMode}
@@ -611,7 +624,6 @@ export function ProjectCreateForm({
                   >
                     <option value="cached">Cached search</option>
                     <option value="live">Live search</option>
-                    <option value="provider_fallback">Provider fallback</option>
                   </select>
                 </label>
               ) : null}

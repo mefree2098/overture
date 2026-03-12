@@ -16,6 +16,8 @@ type DraftDeployProfile = Omit<
   "id" | "projectId" | "createdAt" | "updatedAt"
 >;
 
+type PackageManager = "npm" | "pnpm" | "yarn" | "bun";
+
 function readPackageJson(repoRoot: string) {
   const packageJsonPath = path.join(repoRoot, "package.json");
 
@@ -62,6 +64,35 @@ function readEnvFile(repoRoot: string, fileName: string) {
   }
 }
 
+function detectPackageManager(repoRoot: string): PackageManager {
+  if (existsSync(path.join(repoRoot, "pnpm-lock.yaml"))) {
+    return "pnpm";
+  }
+
+  if (existsSync(path.join(repoRoot, "yarn.lock"))) {
+    return "yarn";
+  }
+
+  if (existsSync(path.join(repoRoot, "bun.lock")) || existsSync(path.join(repoRoot, "bun.lockb"))) {
+    return "bun";
+  }
+
+  return "npm";
+}
+
+function packageManagerScriptCommand(packageManager: PackageManager, scriptName: string) {
+  switch (packageManager) {
+    case "pnpm":
+      return `pnpm run ${scriptName}`;
+    case "yarn":
+      return `yarn ${scriptName}`;
+    case "bun":
+      return `bun run ${scriptName}`;
+    default:
+      return `npm run ${scriptName}`;
+  }
+}
+
 function findXcodeContainer(repoRoot: string) {
   const entries = readdirSync(repoRoot);
   const workspace = entries.find((entry) => entry.endsWith(".xcworkspace"));
@@ -96,6 +127,7 @@ function xcodebuildContainerArgs(container: { kind: "workspace" | "project"; pat
 export function detectOperationalProfiles(project: ProjectRecord) {
   const repoRoot = normalizeRepoSource(project.repoSource);
   const packageJson = readPackageJson(repoRoot);
+  const packageManager = detectPackageManager(repoRoot);
   const dockerComposeFile = ["docker-compose.yml", "compose.yml"].find((candidate) =>
     existsSync(path.join(repoRoot, candidate)),
   );
@@ -104,6 +136,9 @@ export function detectOperationalProfiles(project: ProjectRecord) {
     ...readEnvFile(repoRoot, ".env.example"),
   };
   const xcodeContainer = existsSync(repoRoot) ? findXcodeContainer(repoRoot) : null;
+  const xcodeScheme = xcodeContainer
+    ? path.basename(xcodeContainer.path, path.extname(xcodeContainer.path))
+    : null;
   const deployScriptExists = existsSync(path.join(repoRoot, "deploy.sh"));
   const launchProfiles: DraftLaunchProfile[] = [];
   const deployProfiles: DraftDeployProfile[] = [];
@@ -118,7 +153,7 @@ export function detectOperationalProfiles(project: ProjectRecord) {
     launchProfiles.push({
       target: "web",
       label: "Web app dev server",
-      command: "npm run dev",
+      command: packageManagerScriptCommand(packageManager, "dev"),
       cwd: repoRoot,
       healthcheckUrl:
         envConfig.OVERTURE_LAUNCH_HEALTHCHECK_URL ||
@@ -133,7 +168,7 @@ export function detectOperationalProfiles(project: ProjectRecord) {
     launchProfiles.push({
       target: "api",
       label: "Application start command",
-      command: "npm run start",
+      command: packageManagerScriptCommand(packageManager, "start"),
       cwd: repoRoot,
       healthcheckUrl:
         envConfig.OVERTURE_LAUNCH_HEALTHCHECK_URL ||
@@ -164,12 +199,11 @@ export function detectOperationalProfiles(project: ProjectRecord) {
   }
 
   if (xcodeContainer) {
-    const scheme = path.basename(xcodeContainer.path, path.extname(xcodeContainer.path));
     launchProfiles.push({
       target: "ios_simulator",
       label: "iOS Simulator",
       command: `xcodebuild ${xcodebuildContainerArgs(xcodeContainer)} -scheme ${JSON.stringify(
-        scheme,
+        xcodeScheme,
       )} -destination 'platform=iOS Simulator,name=iPhone 16' build`,
       cwd: repoRoot,
       healthcheckUrl: null,
@@ -240,7 +274,9 @@ export function detectOperationalProfiles(project: ProjectRecord) {
     deployProfiles.push({
       target: "ios_testflight",
       label: "iOS TestFlight upload",
-      command: `xcodebuild ${xcodebuildContainerArgs(xcodeContainer)} archive`,
+      command: `xcodebuild ${xcodebuildContainerArgs(xcodeContainer)} -scheme ${JSON.stringify(
+        xcodeScheme,
+      )} archive`,
       cwd: repoRoot,
       approvalRequired: true,
       metadata: {
@@ -251,7 +287,9 @@ export function detectOperationalProfiles(project: ProjectRecord) {
     deployProfiles.push({
       target: "ios_app_store",
       label: "iOS App Store submission prep",
-      command: `xcodebuild ${xcodebuildContainerArgs(xcodeContainer)} archive`,
+      command: `xcodebuild ${xcodebuildContainerArgs(xcodeContainer)} -scheme ${JSON.stringify(
+        xcodeScheme,
+      )} archive`,
       cwd: repoRoot,
       approvalRequired: true,
       metadata: {

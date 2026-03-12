@@ -16,7 +16,6 @@ export interface OperationalProofRow {
   launch: GateVerdict;
   deploy: GateVerdict;
   health: GateVerdict;
-  perf: GateVerdict;
 }
 
 function latestRun<T extends { startedAt: string }>(runs: T[]) {
@@ -120,7 +119,6 @@ export function buildOperationalProofRows(input: {
       launch,
       deploy,
       health,
-      perf: "waived",
     };
   });
 }

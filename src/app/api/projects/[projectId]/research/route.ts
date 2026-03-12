@@ -6,7 +6,7 @@ import { z } from "zod";
 import { runProjectResearch } from "@/lib/server/research-runner";
 
 const researchSchema = z.object({
-  searchMode: z.enum(["cached", "live", "provider_fallback"]).optional(),
+  searchMode: z.enum(["cached", "live"]).optional(),
 });
 
 export async function POST(
