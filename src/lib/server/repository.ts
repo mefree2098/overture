@@ -15,6 +15,7 @@ import { getDb } from "@/lib/server/db";
 import { detectOperationalProfiles } from "@/lib/server/launch-profiles";
 import { buildSpecIrWithLlm } from "@/lib/server/llm-planner";
 import { generatePlanFromSpec } from "@/lib/server/plan-generator";
+import { buildProjectProductGuide } from "@/lib/server/product-guide";
 import {
   appendProjectTokenUsageBySlug,
   hydrateStoredProjectTokenUsage,
@@ -2099,6 +2100,12 @@ export function getProjectSnapshot(projectId: string): ProjectSnapshot | null {
     gateStatus.deployStatus,
     gateStatus.releaseStatus,
   ].filter((status) => status === "fail").length;
+  const productGuide = buildProjectProductGuide({
+    project,
+    artifacts,
+    launchProfiles,
+    deployProfiles,
+  });
 
   db.prepare(
     `UPDATE projects SET health = ?, updated_at = ?, last_activity_at = ? WHERE id = ?`,
@@ -2114,6 +2121,7 @@ export function getProjectSnapshot(projectId: string): ProjectSnapshot | null {
       ...project,
       health: computeProjectHealth(gateStatus, counts),
     },
+    productGuide,
     specDocument: specDocument ? hydrateSpecDocument(specDocument) : null,
     planVersion: normalizePlanVersionSummary(
       project.name,

@@ -39,7 +39,7 @@ import {
   stripAnsi,
 } from "@/lib/utils";
 
-type ProjectTab = "overview" | "plan" | "runtime" | "evidence";
+type ProjectTab = "overview" | "product" | "plan" | "runtime" | "evidence";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -197,6 +197,137 @@ function ArtifactPreview({ artifact }: { artifact: ArtifactRecord }) {
         />
       ) : null}
     </Link>
+  );
+}
+
+function CopyValueButton({
+  copied,
+  onClick,
+}: {
+  copied: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="rounded-full border border-[var(--color-border)] bg-white/6 px-3 py-1 text-xs font-semibold text-[var(--color-muted)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-ink)]"
+    >
+      {copied ? "Copied" : "Copy"}
+    </button>
+  );
+}
+
+function ProductLocationCard({
+  location,
+  copied,
+  onCopy,
+}: {
+  location: ProjectSnapshot["productGuide"]["locations"][number];
+  copied: boolean;
+  onCopy: (value: string) => void;
+}) {
+  return (
+    <div className="rounded-[24px] border border-white/8 bg-white/4 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--color-muted)]">
+            {location.primary ? "Primary location" : "Location"}
+          </p>
+          <p className="mt-2 text-base font-semibold text-[var(--color-ink)]">
+            {location.label}
+          </p>
+        </div>
+        <CopyValueButton copied={copied} onClick={() => onCopy(location.path)} />
+      </div>
+      <p className="mt-3 break-all rounded-[18px] border border-white/8 bg-[rgba(2,8,18,0.52)] px-4 py-3 font-mono text-sm text-[var(--color-ink)]">
+        {location.path}
+      </p>
+      <p className="mt-3 text-sm leading-6 text-[var(--color-muted)]">{location.detail}</p>
+    </div>
+  );
+}
+
+function ProductCommandCard({
+  command,
+  copied,
+  onCopy,
+}: {
+  command: ProjectSnapshot["productGuide"]["runCommands"][number];
+  copied: boolean;
+  onCopy: (value: string) => void;
+}) {
+  return (
+    <div className="rounded-[24px] border border-white/8 bg-white/4 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--color-muted)]">
+            {command.category}
+          </p>
+          <p className="mt-2 text-base font-semibold text-[var(--color-ink)]">
+            {command.label}
+          </p>
+        </div>
+        <CopyValueButton copied={copied} onClick={() => onCopy(command.command)} />
+      </div>
+      <p className="mt-3 text-sm leading-6 text-[var(--color-muted)]">{command.detail}</p>
+      <p className="mt-3 text-xs uppercase tracking-[0.18em] text-[var(--color-muted)]">
+        Working directory
+      </p>
+      <p className="mt-2 break-all rounded-[18px] border border-white/8 bg-white/4 px-4 py-3 font-mono text-xs text-[var(--color-muted)]">
+        {command.cwd}
+      </p>
+      <p className="mt-3 text-xs uppercase tracking-[0.18em] text-[var(--color-muted)]">
+        Command
+      </p>
+      <p className="mt-2 break-all rounded-[18px] border border-white/8 bg-[rgba(2,8,18,0.52)] px-4 py-3 font-mono text-sm text-[var(--color-ink)]">
+        {command.command}
+      </p>
+    </div>
+  );
+}
+
+function ProductDocumentCard({
+  document,
+  copied,
+  onCopy,
+}: {
+  document: ProjectSnapshot["productGuide"]["documents"][number];
+  copied: boolean;
+  onCopy: (value: string) => void;
+}) {
+  return (
+    <div className="rounded-[24px] border border-white/8 bg-white/4 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--color-muted)]">
+            Document
+          </p>
+          <p className="mt-2 text-base font-semibold text-[var(--color-ink)]">
+            {document.label}
+          </p>
+        </div>
+        {document.path ? (
+          <CopyValueButton copied={copied} onClick={() => onCopy(document.path!)} />
+        ) : null}
+      </div>
+      <p className="mt-3 text-sm leading-6 text-[var(--color-muted)]">{document.detail}</p>
+      {document.path ? (
+        <p className="mt-3 break-all rounded-[18px] border border-white/8 bg-[rgba(2,8,18,0.52)] px-4 py-3 font-mono text-sm text-[var(--color-ink)]">
+          {document.path}
+        </p>
+      ) : null}
+      {document.href ? (
+        <Link
+          href={document.href}
+          target="_blank"
+          className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-[var(--color-accent)]"
+        >
+          Open artifact
+          <ExternalLink className="h-4 w-4" />
+        </Link>
+      ) : null}
+    </div>
   );
 }
 
@@ -381,6 +512,7 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
   const router = useRouter();
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [activeTab, setActiveTab] = useState<ProjectTab>("overview");
+  const [copiedItemId, setCopiedItemId] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
   const [nameDraft, setNameDraft] = useState(initialSnapshot.project.name);
@@ -801,6 +933,17 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
       ? "The last Symphony run stopped. Open Live run to review the last runtime details and restart it."
       : "Review the plan and start the run when you are ready.";
 
+  function copyToClipboard(id: string, value: string) {
+    navigator.clipboard.writeText(value).then(() => {
+      setCopiedItemId(id);
+      window.setTimeout(() => {
+        setCopiedItemId((current) => (current === id ? null : current));
+      }, 1400);
+    }).catch(() => {
+      setCopiedItemId(null);
+    });
+  }
+
   return (
     <div className="space-y-6">
       <section className="panel halo-ring rounded-[36px] p-6 lg:p-8">
@@ -938,6 +1081,14 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
                   <ExternalLink className="h-4 w-4" />
                   Deploy targets
                 </Link>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("product")}
+                  className="inline-flex items-center gap-2 rounded-full border border-[var(--color-border)] bg-white/6 px-5 py-3 text-sm font-semibold text-[var(--color-muted)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-ink)]"
+                >
+                  <Boxes className="h-4 w-4" />
+                  Final product
+                </button>
               </div>
               {runError ? <p className="mt-3 text-sm text-[var(--color-danger)]">{runError}</p> : null}
               {!runError && stoppedRuntime && lastStartFailed ? (
@@ -1131,6 +1282,11 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
             label="Overview"
           />
           <TabButton
+            active={activeTab === "product"}
+            onClick={() => setActiveTab("product")}
+            label="Final product"
+          />
+          <TabButton
             active={activeTab === "plan"}
             onClick={() => setActiveTab("plan")}
             label="Tasks & plan"
@@ -1150,6 +1306,34 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
 
       {activeTab === "overview" ? (
         <section className="space-y-6">
+          {snapshot.gateStatus.releaseStatus === "pass" ? (
+            <div className="panel rounded-[30px] border border-emerald-300/20 bg-emerald-400/8 p-6">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--color-success)]">
+                    Final product ready
+                  </p>
+                  <h2 className="mt-3 text-2xl font-semibold text-[var(--color-ink)]">
+                    The project passed release and is ready for handoff
+                  </h2>
+                  <p className="mt-2 max-w-3xl text-sm leading-7 text-[var(--color-muted)]">
+                    Open the Final product tab for the exact code location, workspace path, run
+                    commands, test commands, publish commands, and the key files Overture
+                    generated.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("product")}
+                  className="glass-button inline-flex items-center gap-2 rounded-full px-5 py-3 text-sm font-semibold"
+                >
+                  <Boxes className="h-4 w-4" />
+                  Open final product
+                </button>
+              </div>
+            </div>
+          ) : null}
+
           <div className="grid gap-4 lg:grid-cols-2">
             <GateCard
               label="QA checks"
@@ -1287,6 +1471,185 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
                     {projectTokenUsage.outputTokens.toLocaleString()} out
                   </p>
                 </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      {activeTab === "product" ? (
+        <section className="space-y-6">
+          <div className="panel rounded-[30px] p-6">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--color-accent)]">
+                  Product handoff
+                </p>
+                <h2 className="mt-3 text-3xl font-semibold text-[var(--color-ink)]">
+                  Where the final product lives and how to use it
+                </h2>
+                <p className="mt-2 max-w-3xl text-sm leading-7 text-[var(--color-muted)]">
+                  Overture builds inside a copied workspace. This tab gives you the direct code
+                  location plus the run, test, and publish entry points for the finished project.
+                </p>
+              </div>
+              <div className="rounded-[22px] border border-white/8 bg-white/4 px-4 py-3 text-sm text-[var(--color-muted)]">
+                <span className="font-semibold text-[var(--color-ink)]">
+                  Primary path:
+                </span>{" "}
+                {snapshot.productGuide.primaryLabel}
+              </div>
+            </div>
+
+            <div className="mt-5 space-y-3">
+              {snapshot.productGuide.notes.map((note, index) => (
+                <div
+                  key={`${note}-${index}`}
+                  className="rounded-[22px] border border-white/8 bg-white/4 p-4 text-sm leading-7 text-[var(--color-muted)]"
+                >
+                  {note}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-[1.02fr_0.98fr]">
+            <div className="panel rounded-[30px] p-6">
+              <h2 className="text-2xl font-semibold text-[var(--color-ink)]">
+                Code and workspace locations
+              </h2>
+              <p className="mt-2 text-sm leading-7 text-[var(--color-muted)]">
+                These are the exact paths Overture uses for the source repo, working copy,
+                runtime files, and generated evidence.
+              </p>
+              <div className="mt-5 grid gap-4">
+                {snapshot.productGuide.locations.map((location) => (
+                  <ProductLocationCard
+                    key={location.id}
+                    location={location}
+                    copied={copiedItemId === location.id}
+                    onCopy={(value) => copyToClipboard(location.id, value)}
+                  />
+                ))}
+              </div>
+            </div>
+
+            <div className="panel rounded-[30px] p-6">
+              <h2 className="text-2xl font-semibold text-[var(--color-ink)]">
+                Access and key files
+              </h2>
+              <p className="mt-2 text-sm leading-7 text-[var(--color-muted)]">
+                Use these `cd` commands to jump to the right directory, then open the key docs or
+                reports from the same handoff surface.
+              </p>
+              <div className="mt-5 space-y-4">
+                {snapshot.productGuide.accessCommands.map((command) => (
+                  <ProductCommandCard
+                    key={command.id}
+                    command={command}
+                    copied={copiedItemId === command.id}
+                    onCopy={(value) => copyToClipboard(command.id, value)}
+                  />
+                ))}
+                {snapshot.productGuide.documents.length ? (
+                  <div className="grid gap-4">
+                    {snapshot.productGuide.documents.map((document) => (
+                      <ProductDocumentCard
+                        key={document.id}
+                        document={document}
+                        copied={copiedItemId === document.id}
+                        onCopy={(value) => copyToClipboard(document.id, value)}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-[22px] border border-white/8 bg-white/4 p-4 text-sm text-[var(--color-muted)]">
+                    No additional README or report files are available yet.
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-3">
+            <div className="panel rounded-[30px] p-6">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-2xl font-semibold text-[var(--color-ink)]">Run it</h2>
+                <Link
+                  href={`/projects/${snapshot.project.id}/launch`}
+                  className="inline-flex items-center gap-2 text-sm font-semibold text-[var(--color-accent)]"
+                >
+                  Launch page
+                  <ExternalLink className="h-4 w-4" />
+                </Link>
+              </div>
+              <div className="mt-5 space-y-4">
+                {snapshot.productGuide.runCommands.length ? (
+                  snapshot.productGuide.runCommands.map((command) => (
+                    <ProductCommandCard
+                      key={command.id}
+                      command={command}
+                      copied={copiedItemId === command.id}
+                      onCopy={(value) => copyToClipboard(command.id, value)}
+                    />
+                  ))
+                ) : (
+                  <div className="rounded-[22px] border border-white/8 bg-white/4 p-4 text-sm text-[var(--color-muted)]">
+                    Overture did not detect a launch command for this project yet.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="panel rounded-[30px] p-6">
+              <h2 className="text-2xl font-semibold text-[var(--color-ink)]">Test it</h2>
+              <p className="mt-2 text-sm leading-7 text-[var(--color-muted)]">
+                Explicit package scripts detected from the final code location.
+              </p>
+              <div className="mt-5 space-y-4">
+                {snapshot.productGuide.testCommands.length ? (
+                  snapshot.productGuide.testCommands.map((command) => (
+                    <ProductCommandCard
+                      key={command.id}
+                      command={command}
+                      copied={copiedItemId === command.id}
+                      onCopy={(value) => copyToClipboard(command.id, value)}
+                    />
+                  ))
+                ) : (
+                  <div className="rounded-[22px] border border-white/8 bg-white/4 p-4 text-sm text-[var(--color-muted)]">
+                    No package-based test, lint, or build scripts were detected automatically.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="panel rounded-[30px] p-6">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-2xl font-semibold text-[var(--color-ink)]">Publish it</h2>
+                <Link
+                  href={`/projects/${snapshot.project.id}/deploy`}
+                  className="inline-flex items-center gap-2 text-sm font-semibold text-[var(--color-accent)]"
+                >
+                  Deploy page
+                  <ExternalLink className="h-4 w-4" />
+                </Link>
+              </div>
+              <div className="mt-5 space-y-4">
+                {snapshot.productGuide.publishCommands.length ? (
+                  snapshot.productGuide.publishCommands.map((command) => (
+                    <ProductCommandCard
+                      key={command.id}
+                      command={command}
+                      copied={copiedItemId === command.id}
+                      onCopy={(value) => copyToClipboard(command.id, value)}
+                    />
+                  ))
+                ) : (
+                  <div className="rounded-[22px] border border-white/8 bg-white/4 p-4 text-sm text-[var(--color-muted)]">
+                    Overture did not detect any deployment profiles for this project.
+                  </div>
+                )}
               </div>
             </div>
           </div>

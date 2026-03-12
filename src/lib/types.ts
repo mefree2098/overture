@@ -385,7 +385,45 @@ export interface ProjectSummary {
   failingGates: number;
 }
 
+export interface ProjectProductLocationRecord {
+  id: string;
+  label: string;
+  path: string;
+  detail: string;
+  primary: boolean;
+}
+
+export interface ProjectProductCommandRecord {
+  id: string;
+  label: string;
+  command: string;
+  cwd: string;
+  detail: string;
+  category: "access" | "run" | "test" | "publish";
+}
+
+export interface ProjectProductDocumentRecord {
+  id: string;
+  label: string;
+  detail: string;
+  path: string | null;
+  href: string | null;
+}
+
+export interface ProjectProductGuide {
+  primaryPath: string;
+  primaryLabel: string;
+  locations: ProjectProductLocationRecord[];
+  accessCommands: ProjectProductCommandRecord[];
+  runCommands: ProjectProductCommandRecord[];
+  testCommands: ProjectProductCommandRecord[];
+  publishCommands: ProjectProductCommandRecord[];
+  documents: ProjectProductDocumentRecord[];
+  notes: string[];
+}
+
 export interface ProjectSnapshot extends ProjectSummary {
+  productGuide: ProjectProductGuide;
   specDocument: SpecDocumentRecord | null;
   planVersion: PlanVersionRecord | null;
   workItems: WorkItemRecord[];
