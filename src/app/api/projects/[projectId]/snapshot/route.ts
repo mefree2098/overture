@@ -17,10 +17,9 @@ export async function GET(
   }
 
   const symphony = await getSymphonyRuntime(snapshot.project.slug);
-  const refreshedSnapshot = getProjectSnapshot(projectId) ?? snapshot;
 
   return NextResponse.json({
-    ...refreshedSnapshot,
+    ...snapshot,
     symphony,
   });
 }

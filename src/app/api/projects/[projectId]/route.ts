@@ -18,6 +18,21 @@ const updateProjectSchema = z
     executionModel: z.string().max(120).nullable().optional(),
     plannerReasoningEffort: z.enum(["low", "medium", "high", "xhigh"]).optional(),
     executionReasoningEffort: z.enum(["low", "medium", "high", "xhigh"]).optional(),
+    qaStrictness: z.number().int().min(1).max(5).optional(),
+    securityStrictness: z.number().int().min(1).max(5).optional(),
+    deploymentTargets: z
+      .array(
+        z.enum([
+          "local",
+          "jetson",
+          "raspberry_pi",
+          "azure",
+          "aws",
+          "ios_testflight",
+          "ios_app_store",
+        ]),
+      )
+      .optional(),
     symphonyMaxConcurrentAgents: z.number().int().min(1).max(8).optional(),
     symphonyMaxTurns: z.number().int().min(4).max(80).optional(),
   })

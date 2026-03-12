@@ -485,6 +485,7 @@ export interface AppSettingsRecord {
   defaultRepoSource: string;
   defaultQaStrictness: number;
   defaultSecurityStrictness: number;
+  defaultDeploymentTargets: DeploymentTarget[];
   symphonyMaxConcurrentAgents: number;
   symphonyMaxTurns: number;
   createdAt: string;

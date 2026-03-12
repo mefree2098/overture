@@ -7,6 +7,7 @@ import {
   createDeployRunRecord,
   failDeployRunRecord,
   getProjectSnapshot,
+  refreshOperationalProfiles,
   writeArtifact,
 } from "@/lib/server/repository";
 import { getProjectRoot } from "@/lib/server/storage";
@@ -92,6 +93,7 @@ export async function runProjectDeployment(input: {
   deployProfileId: string;
   confirmed?: boolean;
 }) {
+  refreshOperationalProfiles(input.projectId);
   const snapshot = getProjectSnapshot(input.projectId);
 
   if (!snapshot) {

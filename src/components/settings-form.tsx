@@ -5,6 +5,7 @@ import {
   CodexReasoningSelect,
 } from "@/components/codex-reasoning-select";
 import { CodexModelSelect } from "@/components/codex-model-select";
+import { DeploymentTargetsField } from "@/components/deployment-targets-field";
 import { ResearchProviderSelect } from "@/components/research-provider-select";
 import {
   getCodexReasoningEffortOptions,
@@ -78,6 +79,9 @@ export function SettingsForm({
   const [defaultSecurityStrictness, setDefaultSecurityStrictness] = useState(
     initialSettings.defaultSecurityStrictness,
   );
+  const [defaultDeploymentTargets, setDefaultDeploymentTargets] = useState(
+    initialSettings.defaultDeploymentTargets,
+  );
   const [symphonyMaxConcurrentAgents, setSymphonyMaxConcurrentAgents] = useState(
     initialSettings.symphonyMaxConcurrentAgents,
   );
@@ -144,6 +148,7 @@ export function SettingsForm({
             defaultRepoSource,
             defaultQaStrictness,
             defaultSecurityStrictness,
+            defaultDeploymentTargets,
             symphonyMaxConcurrentAgents,
             symphonyMaxTurns,
           }),
@@ -348,6 +353,20 @@ export function SettingsForm({
                 {defaultSecurityStrictness} / 5
               </div>
             </label>
+
+            <div className="space-y-2 rounded-[24px] border border-white/8 bg-white/4 p-4 lg:col-span-2">
+              <span className="text-sm font-semibold text-[var(--color-ink)]">
+                Default deployment targets
+              </span>
+              <p className="text-sm leading-6 text-[var(--color-muted)]">
+                Overture uses these targets when it generates deployment work, handoff guidance, and
+                publish commands for new projects.
+              </p>
+              <DeploymentTargetsField
+                selectedTargets={defaultDeploymentTargets}
+                onChange={setDefaultDeploymentTargets}
+              />
+            </div>
 
             <label className="space-y-2">
               <span className="text-sm font-semibold text-[var(--color-ink)]">

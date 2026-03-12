@@ -15,6 +15,19 @@ const settingsPatchSchema = z.object({
   defaultRepoSource: z.string().min(1).max(500).optional(),
   defaultQaStrictness: z.number().int().min(1).max(5).optional(),
   defaultSecurityStrictness: z.number().int().min(1).max(5).optional(),
+  defaultDeploymentTargets: z
+    .array(
+      z.enum([
+        "local",
+        "jetson",
+        "raspberry_pi",
+        "azure",
+        "aws",
+        "ios_testflight",
+        "ios_app_store",
+      ]),
+    )
+    .optional(),
   symphonyMaxConcurrentAgents: z.number().int().min(1).max(8).optional(),
   symphonyMaxTurns: z.number().int().min(4).max(80).optional(),
 });

@@ -7,6 +7,7 @@ import {
   createLaunchRunRecord,
   failLaunchRunRecord,
   getProjectSnapshot,
+  refreshOperationalProfiles,
   writeArtifact,
 } from "@/lib/server/repository";
 import { getProjectRoot } from "@/lib/server/storage";
@@ -204,6 +205,7 @@ export async function runProjectLaunch(input: {
   projectId: string;
   launchProfileId: string;
 }) {
+  refreshOperationalProfiles(input.projectId);
   const snapshot = getProjectSnapshot(input.projectId);
 
   if (!snapshot) {

@@ -6,6 +6,7 @@ import { ProjectCard } from "@/components/project-card";
 import { ProjectCreateForm } from "@/components/project-create-form";
 import { codexReasoningEffortLabel } from "@/lib/codex-reasoning";
 import { getCodexModelOptions } from "@/lib/model-catalog";
+import { deploymentTargetLabel } from "@/lib/project-pipeline";
 import { getAppSettings } from "@/lib/server/app-settings";
 import { listProjects } from "@/lib/server/repository";
 import { getExecutionModeSupport } from "@/lib/server/runtime-config";
@@ -151,6 +152,14 @@ export default function HomePage() {
               </div>
               <div className="rounded-[24px] border border-white/8 bg-white/4 p-4">
                 <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--color-muted)]">
+                  Deploy targets
+                </p>
+                <p className="mt-2 text-base text-[var(--color-ink)]">
+                  {appSettings.defaultDeploymentTargets.map((target) => deploymentTargetLabel(target)).join(", ")}
+                </p>
+              </div>
+              <div className="rounded-[24px] border border-white/8 bg-white/4 p-4">
+                <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--color-muted)]">
                   Account status
                 </p>
                 <p className="mt-2 text-base text-[var(--color-ink)]">
@@ -172,7 +181,8 @@ export default function HomePage() {
                 <Sparkles className="h-4 w-4" />
               </Link>
               <span className="text-sm text-[var(--color-muted)]">
-                Settings control the research provider, models, thinking levels, and run mode.
+                Settings control the research provider, models, thinking levels, run mode, and
+                default deployment scope.
               </span>
             </div>
           </div>

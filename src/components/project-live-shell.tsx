@@ -19,11 +19,13 @@ import {
 } from "lucide-react";
 import { CodexModelSelect } from "@/components/codex-model-select";
 import { CodexReasoningSelect } from "@/components/codex-reasoning-select";
+import { DeploymentTargetsField } from "@/components/deployment-targets-field";
 import { PlanWorkbench } from "@/components/plan-workbench";
 import { StatusPill } from "@/components/status-pill";
 import { getCodexReasoningEffortOptions } from "@/lib/codex-reasoning";
 import { getCodexModelOptions } from "@/lib/model-catalog";
-import { researchProviderLabel } from "@/lib/project-pipeline";
+import { buildOperationalProofRows } from "@/lib/operational-proof";
+import { deploymentTargetLabel, researchProviderLabel } from "@/lib/project-pipeline";
 import { addTokenUsage, parseTokenUsage } from "@/lib/token-usage";
 import type {
   ArtifactRecord,
@@ -531,6 +533,13 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
   const [executionModeDraft, setExecutionModeDraft] = useState<ExecutionMode>(
     initialSnapshot.project.executionMode,
   );
+  const [qaStrictnessDraft, setQaStrictnessDraft] = useState(initialSnapshot.project.qaStrictness);
+  const [securityStrictnessDraft, setSecurityStrictnessDraft] = useState(
+    initialSnapshot.project.securityStrictness,
+  );
+  const [deploymentTargetsDraft, setDeploymentTargetsDraft] = useState(
+    initialSnapshot.project.deploymentTargets,
+  );
   const [maxAgentsDraft, setMaxAgentsDraft] = useState(
     initialSnapshot.project.symphonyMaxConcurrentAgents,
   );
@@ -565,6 +574,16 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
     snapshot.planVersion?.specIr.summary ?? "",
     snapshot.project.name,
   );
+  const deploymentTargetsLabel = snapshot.project.deploymentTargets
+    .map((target) => deploymentTargetLabel(target))
+    .join(", ");
+  const operationalProofRows = buildOperationalProofRows({
+    projectDeploymentTargets: snapshot.project.deploymentTargets,
+    launchProfiles: snapshot.launchProfiles,
+    launchRuns: snapshot.launchRuns,
+    deployProfiles: snapshot.deployProfiles,
+    deployRuns: snapshot.deployRuns,
+  });
   const modelOptions = getCodexModelOptions([
     snapshot.project.plannerModel,
     snapshot.project.executionModel,
@@ -579,6 +598,9 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
     plannerReasoningDraft !== snapshot.project.plannerReasoningEffort ||
     executionReasoningDraft !== snapshot.project.executionReasoningEffort ||
     executionModeDraft !== snapshot.project.executionMode ||
+    qaStrictnessDraft !== snapshot.project.qaStrictness ||
+    securityStrictnessDraft !== snapshot.project.securityStrictness ||
+    deploymentTargetsDraft.join("|") !== snapshot.project.deploymentTargets.join("|") ||
     maxAgentsDraft !== snapshot.project.symphonyMaxConcurrentAgents ||
     maxTurnsDraft !== snapshot.project.symphonyMaxTurns;
   const waitingForSlotQueue = symphonyRetryQueue.filter(isWaitingForSlot);
@@ -648,14 +670,20 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
     setPlannerReasoningDraft(snapshot.project.plannerReasoningEffort);
     setExecutionReasoningDraft(snapshot.project.executionReasoningEffort);
     setExecutionModeDraft(snapshot.project.executionMode);
+    setQaStrictnessDraft(snapshot.project.qaStrictness);
+    setSecurityStrictnessDraft(snapshot.project.securityStrictness);
+    setDeploymentTargetsDraft(snapshot.project.deploymentTargets);
     setMaxAgentsDraft(snapshot.project.symphonyMaxConcurrentAgents);
     setMaxTurnsDraft(snapshot.project.symphonyMaxTurns);
   }, [
     snapshot.project.executionMode,
     snapshot.project.executionModel,
     snapshot.project.executionReasoningEffort,
+    snapshot.project.deploymentTargets,
     snapshot.project.plannerModel,
     snapshot.project.plannerReasoningEffort,
+    snapshot.project.qaStrictness,
+    snapshot.project.securityStrictness,
     snapshot.project.symphonyMaxConcurrentAgents,
     snapshot.project.symphonyMaxTurns,
   ]);
@@ -794,6 +822,9 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
             plannerReasoningEffort: plannerReasoningDraft,
             executionReasoningEffort: executionReasoningDraft,
             executionMode: executionModeDraft,
+            qaStrictness: qaStrictnessDraft,
+            securityStrictness: securityStrictnessDraft,
+            deploymentTargets: deploymentTargetsDraft,
             symphonyMaxConcurrentAgents: maxAgentsDraft,
             symphonyMaxTurns: maxTurnsDraft,
           }),
@@ -863,42 +894,6 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
     });
   }
 
-  const deploymentRows = [
-    {
-      target: "Local",
-      build: snapshot.gateStatus.deployStatus === "pass" ? "pass" : "pending",
-      deploy: snapshot.gateStatus.deployStatus,
-      smoke: snapshot.gateStatus.deployStatus === "pass" ? "pass" : "pending",
-      perf: "partial" as GateVerdict,
-    },
-    {
-      target: "Jetson",
-      build: snapshot.artifacts.some((artifact) => artifact.label.toLowerCase().includes("jetson"))
-        ? "pass"
-        : "partial",
-      deploy: "partial" as GateVerdict,
-      smoke: "pending" as GateVerdict,
-      perf: "pending" as GateVerdict,
-    },
-    {
-      target: "Azure",
-      build: snapshot.artifacts.some((artifact) => artifact.label.toLowerCase().includes("azure"))
-        ? "pass"
-        : "partial",
-      deploy: "partial" as GateVerdict,
-      smoke: "pending" as GateVerdict,
-      perf: "pending" as GateVerdict,
-    },
-    {
-      target: "AWS",
-      build: snapshot.artifacts.some((artifact) => artifact.label.toLowerCase().includes("aws"))
-        ? "pass"
-        : "partial",
-      deploy: "partial" as GateVerdict,
-      smoke: "pending" as GateVerdict,
-      perf: "pending" as GateVerdict,
-    },
-  ];
   const planStepState = "done" as const;
   const runStepState =
     snapshot.gateStatus.releaseStatus === "pass"
@@ -1197,6 +1192,51 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
                   </div>
                 </div>
                 <div className="rounded-[22px] border border-white/8 bg-white/4 p-4">
+                  <p className="font-semibold text-[var(--color-ink)]">QA strictness</p>
+                  <p className="mt-2 text-sm text-[var(--color-muted)]">
+                    Higher values keep stronger validation expectations on this project.
+                  </p>
+                  <input
+                    type="range"
+                    min="1"
+                    max="5"
+                    value={qaStrictnessDraft}
+                    onChange={(event) => setQaStrictnessDraft(Number(event.target.value))}
+                    className="mt-4 w-full accent-[var(--color-accent)]"
+                  />
+                  <div className="mt-2 text-sm text-[var(--color-muted)]">{qaStrictnessDraft} / 5</div>
+                </div>
+                <div className="rounded-[22px] border border-white/8 bg-white/4 p-4">
+                  <p className="font-semibold text-[var(--color-ink)]">Security strictness</p>
+                  <p className="mt-2 text-sm text-[var(--color-muted)]">
+                    Higher values keep stronger security expectations on this project.
+                  </p>
+                  <input
+                    type="range"
+                    min="1"
+                    max="5"
+                    value={securityStrictnessDraft}
+                    onChange={(event) => setSecurityStrictnessDraft(Number(event.target.value))}
+                    className="mt-4 w-full accent-[var(--color-magenta)]"
+                  />
+                  <div className="mt-2 text-sm text-[var(--color-muted)]">
+                    {securityStrictnessDraft} / 5
+                  </div>
+                </div>
+                <div className="rounded-[22px] border border-white/8 bg-white/4 p-4 sm:col-span-2">
+                  <p className="font-semibold text-[var(--color-ink)]">Deployment targets</p>
+                  <p className="mt-2 text-sm text-[var(--color-muted)]">
+                    These targets define where Overture should expect deployment proof and what the
+                    handoff should expose.
+                  </p>
+                  <div className="mt-4">
+                    <DeploymentTargetsField
+                      selectedTargets={deploymentTargetsDraft}
+                      onChange={setDeploymentTargetsDraft}
+                    />
+                  </div>
+                </div>
+                <div className="rounded-[22px] border border-white/8 bg-white/4 p-4">
                   <p className="font-semibold text-[var(--color-ink)]">Parallel workers / turns</p>
                   <div className="mt-2 grid gap-3 sm:grid-cols-2">
                     <input
@@ -1450,6 +1490,12 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
                   <p className="font-semibold text-[var(--color-ink)]">QA / Security strictness</p>
                   <p className="mt-2 text-sm text-[var(--color-muted)]">
                     {snapshot.project.qaStrictness} / {snapshot.project.securityStrictness}
+                  </p>
+                </div>
+                <div className="rounded-[22px] border border-white/8 bg-white/4 p-4">
+                  <p className="font-semibold text-[var(--color-ink)]">Deployment targets</p>
+                  <p className="mt-2 text-sm text-[var(--color-muted)]">
+                    {deploymentTargetsLabel || "None selected"}
                   </p>
                 </div>
                 <div className="rounded-[22px] border border-white/8 bg-white/4 p-4">
@@ -1975,33 +2021,41 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
 
             <div className="panel rounded-[30px] p-6">
               <h2 className="text-2xl font-semibold text-[var(--color-ink)]">
-                Deployment proof matrix
+                Operational proof matrix
               </h2>
+              <p className="mt-2 text-sm leading-7 text-[var(--color-muted)]">
+                This matrix is generated from the real launch and deployment profiles, run history,
+                and healthcheck evidence Overture has captured for this project.
+              </p>
               <div className="mt-5 overflow-hidden rounded-[24px] border border-white/8">
                 <table className="min-w-full text-left text-sm text-[var(--color-muted)]">
                   <thead className="bg-white/6 text-[var(--color-ink)]">
                     <tr>
                       <th className="px-4 py-3">Target</th>
-                      <th className="px-4 py-3">Build</th>
+                      <th className="px-4 py-3">Profiles</th>
+                      <th className="px-4 py-3">Launch</th>
                       <th className="px-4 py-3">Deploy</th>
-                      <th className="px-4 py-3">Smoke</th>
-                      <th className="px-4 py-3">Perf sanity</th>
+                      <th className="px-4 py-3">Health</th>
+                      <th className="px-4 py-3">Perf</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {deploymentRows.map((row) => (
+                    {operationalProofRows.map((row) => (
                       <tr key={row.target} className="border-t border-white/8 bg-white/4">
                         <td className="px-4 py-3 font-semibold text-[var(--color-ink)]">
-                          {row.target}
+                          {row.label}
                         </td>
                         <td className="px-4 py-3">
-                          <StatusPill status={row.build} />
+                          <StatusPill status={row.profiles} />
+                        </td>
+                        <td className="px-4 py-3">
+                          <StatusPill status={row.launch} />
                         </td>
                         <td className="px-4 py-3">
                           <StatusPill status={row.deploy} />
                         </td>
                         <td className="px-4 py-3">
-                          <StatusPill status={row.smoke} />
+                          <StatusPill status={row.health} />
                         </td>
                         <td className="px-4 py-3">
                           <StatusPill status={row.perf} />

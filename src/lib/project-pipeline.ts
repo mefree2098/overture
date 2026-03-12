@@ -59,6 +59,48 @@ export function normalizeDeploymentTargets(
   )];
 }
 
+export function deploymentTargetLabel(target: DeploymentTarget) {
+  switch (target) {
+    case "jetson":
+      return "Jetson Orin";
+    case "raspberry_pi":
+      return "Raspberry Pi";
+    case "ios_testflight":
+      return "iOS TestFlight";
+    case "ios_app_store":
+      return "iOS App Store";
+    case "aws":
+      return "AWS";
+    case "azure":
+      return "Azure";
+    default:
+      return "Local";
+  }
+}
+
+export function toggleDeploymentTargetSelection(
+  selectedTargets: DeploymentTarget[],
+  target: DeploymentTarget,
+) {
+  const selected = new Set(normalizeDeploymentTargets(selectedTargets));
+
+  if (selected.has(target)) {
+    if (selected.size === 1) {
+      return DEPLOYMENT_TARGETS.filter((candidate) =>
+        selected.has(candidate as DeploymentTarget),
+      ) as DeploymentTarget[];
+    }
+
+    selected.delete(target);
+  } else {
+    selected.add(target);
+  }
+
+  return DEPLOYMENT_TARGETS.filter((candidate) =>
+    selected.has(candidate as DeploymentTarget),
+  ) as DeploymentTarget[];
+}
+
 export function normalizeWorkshopSearchMode(
   value: string | null | undefined,
 ): WorkshopSearchMode {

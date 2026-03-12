@@ -161,6 +161,9 @@ describe("repository lifecycle", () => {
       plannerReasoningEffort: "xhigh",
       executionReasoningEffort: "xhigh",
       executionMode: "hosted_api",
+      qaStrictness: 2,
+      securityStrictness: 5,
+      deploymentTargets: ["local", "azure"],
       symphonyMaxConcurrentAgents: 5,
       symphonyMaxTurns: 36,
     });
@@ -171,10 +174,16 @@ describe("repository lifecycle", () => {
     expect(updated?.plannerReasoningEffort).toBe("xhigh");
     expect(updated?.executionReasoningEffort).toBe("xhigh");
     expect(updated?.executionMode).toBe("hosted_api");
+    expect(updated?.qaStrictness).toBe(2);
+    expect(updated?.securityStrictness).toBe(5);
+    expect(updated?.deploymentTargets).toEqual(["local", "azure"]);
     expect(updated?.symphonyMaxConcurrentAgents).toBe(5);
     expect(updated?.symphonyMaxTurns).toBe(36);
     expect(snapshot?.project.plannerReasoningEffort).toBe("xhigh");
     expect(snapshot?.project.executionReasoningEffort).toBe("xhigh");
+    expect(snapshot?.project.qaStrictness).toBe(2);
+    expect(snapshot?.project.securityStrictness).toBe(5);
+    expect(snapshot?.project.deploymentTargets).toEqual(["local", "azure"]);
     expect(snapshot?.project.symphonyMaxConcurrentAgents).toBe(5);
     expect(snapshot?.project.symphonyMaxTurns).toBe(36);
   });
@@ -424,6 +433,27 @@ describe("repository lifecycle", () => {
     expect(first?.deployProfiles.map((profile) => profile.id)).toEqual(
       second?.deployProfiles.map((profile) => profile.id),
     );
+  });
+
+  it("does not mutate project timestamps when a snapshot is read", async () => {
+    const repository = await import("@/lib/server/repository");
+
+    const created = await repository.createProjectFromSpec({
+      name: "Read Only Snapshot",
+      repoSource: ".",
+      executionMode: "local_chatgpt",
+      specFilename: "plan.md",
+      specText: "# Blueprint\n\n## Goal\nKeep snapshot reads side-effect free",
+    });
+
+    const first = repository.getProjectSnapshot(created.projectId);
+
+    await new Promise((resolve) => setTimeout(resolve, 15));
+
+    const second = repository.getProjectSnapshot(created.projectId);
+
+    expect(second?.project.updatedAt).toBe(first?.project.updatedAt);
+    expect(second?.project.lastActivityAt).toBe(first?.project.lastActivityAt);
   });
 
   it("auto-advances epic containers and queues their leaf tasks after a milestone closes", async () => {

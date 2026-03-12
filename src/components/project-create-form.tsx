@@ -2,6 +2,7 @@
 
 import { CodexReasoningSelect } from "@/components/codex-reasoning-select";
 import { CodexModelSelect } from "@/components/codex-model-select";
+import { DeploymentTargetsField } from "@/components/deployment-targets-field";
 import { ResearchProviderSelect } from "@/components/research-provider-select";
 import Link from "next/link";
 import { startTransition, useDeferredValue, useEffect, useMemo, useState } from "react";
@@ -106,6 +107,9 @@ export function ProjectCreateForm({
   const [securityStrictness, setSecurityStrictness] = useState(
     appSettings.defaultSecurityStrictness,
   );
+  const [deploymentTargets, setDeploymentTargets] = useState(
+    appSettings.defaultDeploymentTargets,
+  );
   const [plannerModel, setPlannerModel] = useState(appSettings.plannerModel ?? "");
   const [executionModel, setExecutionModel] = useState(appSettings.executionModel ?? "");
   const [plannerReasoningEffort, setPlannerReasoningEffort] =
@@ -117,6 +121,8 @@ export function ProjectCreateForm({
   );
   const [symphonyMaxTurns, setSymphonyMaxTurns] = useState(appSettings.symphonyMaxTurns);
   const [workshopKickoff, setWorkshopKickoff] = useState("");
+  const [sourceBriefFilename, setSourceBriefFilename] = useState("source-brief.md");
+  const [sourceBriefText, setSourceBriefText] = useState("");
   const [workshopSearchMode, setWorkshopSearchMode] =
     useState<WorkshopSearchMode>("cached");
   const [specFilename, setSpecFilename] = useState("plan.md");
@@ -165,6 +171,15 @@ export function ProjectCreateForm({
     setSpecText(await file.text());
   }
 
+  async function handleSourceBriefFileChange(file: File | undefined) {
+    if (!file) {
+      return;
+    }
+
+    setSourceBriefFilename(file.name);
+    setSourceBriefText(await file.text());
+  }
+
   function handleSubmit() {
     setSubmitting(true);
     setError(null);
@@ -180,8 +195,6 @@ export function ProjectCreateForm({
             name,
             repoSource,
             executionMode,
-            sourceBriefText: specText.trim() || null,
-            sourceBriefFilename: specText.trim() ? specFilename : null,
             researchProvider,
             plannerModel: plannerModel.trim() || null,
             executionModel: executionModel.trim() || null,
@@ -192,6 +205,7 @@ export function ProjectCreateForm({
             policyProfile: {
               qaStrictness,
               securityStrictness,
+              deploymentTargets,
             },
             specFilename,
             specText,
@@ -234,7 +248,10 @@ export function ProjectCreateForm({
             policyProfile: {
               qaStrictness,
               securityStrictness,
+              deploymentTargets,
             },
+            sourceBriefText: sourceBriefText.trim() || null,
+            sourceBriefFilename: sourceBriefText.trim() ? sourceBriefFilename : null,
             plannerModel: plannerModel.trim() || null,
             executionModel: executionModel.trim() || null,
             plannerReasoningEffort,
@@ -251,7 +268,7 @@ export function ProjectCreateForm({
 
         const kickoffMessage =
           workshopKickoff.trim() ||
-          (specText.trim()
+          (sourceBriefText.trim()
             ? "Use the source brief attached to this project to draft the first research-ready prompt, summary, and research objectives. Ask no follow-up questions unless critical information is missing."
             : "");
 
@@ -421,6 +438,43 @@ export function ProjectCreateForm({
                 Overture will save a draft project first, then open the Prompt Workshop so you can
                 refine the research prompt before any plan is ingested.
               </p>
+              <div className="space-y-3 rounded-[24px] border border-white/8 bg-white/4 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-[var(--color-ink)]">
+                      Optional source brief
+                    </p>
+                    <p className="text-sm leading-6 text-[var(--color-muted)]">
+                      If you already have a brief or research memo, store it here. Overture will
+                      attach it to the draft project and inject it into the first workshop turn.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-full border border-[var(--color-border)] bg-white/6 px-4 py-2 font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--color-muted)]">
+                      {sourceBriefFilename}
+                    </span>
+                    <label className="glass-button inline-flex cursor-pointer items-center gap-2 rounded-full px-4 py-2 text-sm transition">
+                      <FileText className="h-4 w-4" />
+                      Upload brief
+                      <input
+                        type="file"
+                        accept=".md,.txt,.markdown"
+                        className="hidden"
+                        onChange={(event) => {
+                          void handleSourceBriefFileChange(event.target.files?.[0]);
+                        }}
+                      />
+                    </label>
+                  </div>
+                </div>
+                <textarea
+                  aria-label="Source brief"
+                  value={sourceBriefText}
+                  onChange={(event) => setSourceBriefText(event.target.value)}
+                  placeholder={`# Source brief\n\nSummarize the product, constraints, research links, and what matters most before planning begins.`}
+                  className="glass-input fine-scrollbar min-h-[180px] w-full rounded-[24px] px-4 py-4 text-sm leading-7"
+                />
+              </div>
             </div>
           ) : (
             <div className="space-y-3">
@@ -661,6 +715,20 @@ export function ProjectCreateForm({
                   {securityStrictness} / 5
                 </div>
               </label>
+
+              <div className="space-y-2 rounded-[22px] border border-white/8 bg-white/4 p-4 lg:col-span-2">
+                <span className="text-sm font-semibold text-[var(--color-ink)]">
+                  Deployment targets
+                </span>
+                <p className="text-sm leading-6 text-[var(--color-muted)]">
+                  Choose where Overture should plan deployment work, publish commands, and final
+                  handoff guidance.
+                </p>
+                <DeploymentTargetsField
+                  selectedTargets={deploymentTargets}
+                  onChange={setDeploymentTargets}
+                />
+              </div>
 
               <label className="space-y-2">
                 <span className="text-sm font-semibold text-[var(--color-ink)]">

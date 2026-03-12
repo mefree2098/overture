@@ -30,6 +30,7 @@ describe("app settings", () => {
     expect(defaults.plannerModel).toBeNull();
     expect(defaults.executionModel).toBeNull();
     expect(defaults.executionReasoningEffort).toBe("medium");
+    expect(defaults.defaultDeploymentTargets).toEqual(["local"]);
     expect(defaults.symphonyMaxConcurrentAgents).toBe(5);
     expect(defaults.symphonyMaxTurns).toBe(24);
 
@@ -42,6 +43,7 @@ describe("app settings", () => {
       defaultRepoSource: "/tmp/workspace",
       defaultQaStrictness: 5,
       defaultSecurityStrictness: 3,
+      defaultDeploymentTargets: ["local", "aws"],
       symphonyMaxConcurrentAgents: 4,
       symphonyMaxTurns: 36,
     });
@@ -54,6 +56,7 @@ describe("app settings", () => {
     expect(updated.defaultRepoSource).toBe("/tmp/workspace");
     expect(updated.defaultQaStrictness).toBe(5);
     expect(updated.defaultSecurityStrictness).toBe(3);
+    expect(updated.defaultDeploymentTargets).toEqual(["local", "aws"]);
     expect(updated.symphonyMaxConcurrentAgents).toBe(4);
     expect(updated.symphonyMaxTurns).toBe(36);
   });

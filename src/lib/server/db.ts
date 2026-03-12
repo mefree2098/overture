@@ -69,6 +69,7 @@ function runMigrations(db: Database.Database) {
       default_repo_source TEXT NOT NULL,
       default_qa_strictness INTEGER NOT NULL,
       default_security_strictness INTEGER NOT NULL,
+      default_deployment_targets_json TEXT NOT NULL DEFAULT '["local"]',
       symphony_max_concurrent_agents INTEGER NOT NULL,
       symphony_max_turns INTEGER NOT NULL,
       created_at TEXT NOT NULL,
@@ -357,6 +358,12 @@ function runMigrations(db: Database.Database) {
     "projects",
     "execution_reasoning_effort",
     "TEXT NOT NULL DEFAULT 'medium'",
+  );
+  ensureColumn(
+    db,
+    "app_settings",
+    "default_deployment_targets_json",
+    `TEXT NOT NULL DEFAULT '["local"]'`,
   );
   ensureColumn(
     db,

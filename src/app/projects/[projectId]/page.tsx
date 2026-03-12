@@ -25,13 +25,12 @@ export default async function ProjectPage({
   }
 
   const symphony = await getSymphonyRuntime(snapshot.project.slug);
-  const refreshedSnapshot = getProjectSnapshot(projectId) ?? snapshot;
 
   return (
     <main className="pb-8">
       <ProjectLiveShell
         initialSnapshot={{
-          ...refreshedSnapshot,
+          ...snapshot,
           symphony,
         }}
       />

@@ -1,6 +1,6 @@
 import { DEFAULT_APP_SETTINGS } from "@/lib/constants";
 import { normalizeCodexReasoningEffort } from "@/lib/codex-reasoning";
-import { normalizeResearchProvider } from "@/lib/project-pipeline";
+import { normalizeDeploymentTargets, normalizeResearchProvider } from "@/lib/project-pipeline";
 import { getDb } from "@/lib/server/db";
 import type { AppSettingsRecord, ExecutionMode } from "@/lib/types";
 
@@ -21,6 +21,22 @@ function clamp(value: number, min: number, max: number) {
 
 function normalizeExecutionMode(value: string | null | undefined): ExecutionMode {
   return value === "hosted_api" ? "hosted_api" : "local_chatgpt";
+}
+
+function parseDeploymentTargets(value: unknown) {
+  if (Array.isArray(value)) {
+    return normalizeDeploymentTargets(value);
+  }
+
+  if (typeof value !== "string" || !value.trim()) {
+    return [];
+  }
+
+  try {
+    return normalizeDeploymentTargets(JSON.parse(value) as string[]);
+  } catch {
+    return [];
+  }
 }
 
 function hydrateSettings(row: Record<string, unknown>): AppSettingsRecord {
@@ -53,6 +69,16 @@ function hydrateSettings(row: Record<string, unknown>): AppSettingsRecord {
       1,
       5,
     ),
+    defaultDeploymentTargets: (() => {
+      const normalized = parseDeploymentTargets(
+        row.default_deployment_targets_json ??
+          JSON.stringify(DEFAULT_APP_SETTINGS.defaultDeploymentTargets),
+      );
+
+      return normalized.length
+        ? normalized
+        : [...DEFAULT_APP_SETTINGS.defaultDeploymentTargets];
+    })(),
     symphonyMaxConcurrentAgents: clamp(
       Number(
         row.symphony_max_concurrent_agents ??
@@ -96,11 +122,12 @@ function ensureRow() {
         default_repo_source,
         default_qa_strictness,
         default_security_strictness,
+        default_deployment_targets_json,
         symphony_max_concurrent_agents,
         symphony_max_turns,
         created_at,
         updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
   ).run(
     SETTINGS_ROW_ID,
@@ -113,6 +140,7 @@ function ensureRow() {
     DEFAULT_APP_SETTINGS.defaultRepoSource,
     DEFAULT_APP_SETTINGS.defaultQaStrictness,
     DEFAULT_APP_SETTINGS.defaultSecurityStrictness,
+    JSON.stringify(DEFAULT_APP_SETTINGS.defaultDeploymentTargets),
     DEFAULT_APP_SETTINGS.symphonyMaxConcurrentAgents,
     DEFAULT_APP_SETTINGS.symphonyMaxTurns,
     timestamp,
@@ -165,6 +193,15 @@ export function updateAppSettings(
       1,
       5,
     ),
+    defaultDeploymentTargets: (() => {
+      const normalized = normalizeDeploymentTargets(
+        updates.defaultDeploymentTargets ?? current.defaultDeploymentTargets,
+      );
+
+      return normalized.length
+        ? normalized
+        : [...DEFAULT_APP_SETTINGS.defaultDeploymentTargets];
+    })(),
     symphonyMaxConcurrentAgents: clamp(
       Number(
         updates.symphonyMaxConcurrentAgents ?? current.symphonyMaxConcurrentAgents,
@@ -193,6 +230,7 @@ export function updateAppSettings(
         default_repo_source = ?,
         default_qa_strictness = ?,
         default_security_strictness = ?,
+        default_deployment_targets_json = ?,
         symphony_max_concurrent_agents = ?,
         symphony_max_turns = ?,
         updated_at = ?
@@ -208,6 +246,7 @@ export function updateAppSettings(
     next.defaultRepoSource,
     next.defaultQaStrictness,
     next.defaultSecurityStrictness,
+    JSON.stringify(next.defaultDeploymentTargets),
     next.symphonyMaxConcurrentAgents,
     next.symphonyMaxTurns,
     timestamp,

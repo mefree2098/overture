@@ -739,7 +739,12 @@ export function createFinding(input: {
   return id;
 }
 
-export function recomputeGateStatuses(projectId: string) {
+export function recomputeGateStatuses(
+  projectId: string,
+  options?: {
+    persist?: boolean;
+  },
+) {
   const db = getDb();
   const workItems = hydrateProjectWorkItems(projectId);
   const findings = db
@@ -767,6 +772,18 @@ export function recomputeGateStatuses(projectId: string) {
     ).length,
     totalTasks: workItems.length,
   };
+
+  if (options?.persist === false) {
+    return {
+      projectId,
+      qaStatus,
+      securityStatus,
+      deployStatus,
+      releaseStatus,
+      summary,
+      updatedAt: nowIso(),
+    } satisfies GateStatusRecord;
+  }
 
   db.prepare(
     `
@@ -928,6 +945,9 @@ function resolvePolicyProfile(
   const deploymentTargets = normalizeDeploymentTargets(
     input.policyProfile?.deploymentTargets,
   );
+  const defaultDeploymentTargets = normalizeDeploymentTargets(
+    appSettings.defaultDeploymentTargets,
+  );
 
   return {
     ...DEFAULT_POLICY_PROFILE,
@@ -945,7 +965,9 @@ function resolvePolicyProfile(
     ),
     deploymentTargets: deploymentTargets.length
       ? deploymentTargets
-      : DEFAULT_POLICY_PROFILE.deploymentTargets,
+      : defaultDeploymentTargets.length
+        ? defaultDeploymentTargets
+        : DEFAULT_POLICY_PROFILE.deploymentTargets,
   };
 }
 
@@ -1983,9 +2005,10 @@ export function listProjects(): ProjectSummary[] {
     .map((row) => hydrateProject(row as Record<string, unknown>));
 
   return projects.map((project) => {
-    settleProjectState(project.id);
     const workItems = hydrateProjectWorkItems(project.id);
-    const gateStatus = recomputeGateStatuses(project.id);
+    const gateStatus = recomputeGateStatuses(project.id, {
+      persist: false,
+    });
     const counts = countWorkItems(workItems);
     const currentMilestone = computeCurrentMilestone(workItems);
     const failingGates = [
@@ -2019,8 +2042,6 @@ export function getProjectSnapshot(projectId: string): ProjectSnapshot | null {
   }
 
   const project = hydrateProject(projectRow);
-  refreshOperationalProfiles(projectId);
-  settleProjectState(projectId);
   const specDocument = db
     .prepare(
       "SELECT * FROM spec_documents WHERE project_id = ? ORDER BY created_at DESC LIMIT 1",
@@ -2091,7 +2112,9 @@ export function getProjectSnapshot(projectId: string): ProjectSnapshot | null {
     .prepare("SELECT * FROM deploy_runs WHERE project_id = ? ORDER BY started_at DESC")
     .all(projectId)
     .map((row) => hydrateDeployRun(row as Record<string, unknown>));
-  const gateStatus = recomputeGateStatuses(projectId);
+  const gateStatus = recomputeGateStatuses(projectId, {
+    persist: false,
+  });
   const counts = countWorkItems(workItems);
   const currentMilestone = computeCurrentMilestone(workItems);
   const failingGates = [
@@ -2106,15 +2129,6 @@ export function getProjectSnapshot(projectId: string): ProjectSnapshot | null {
     launchProfiles,
     deployProfiles,
   });
-
-  db.prepare(
-    `UPDATE projects SET health = ?, updated_at = ?, last_activity_at = ? WHERE id = ?`,
-  ).run(
-    computeProjectHealth(gateStatus, counts),
-    nowIso(),
-    nowIso(),
-    projectId,
-  );
 
   return {
     project: {
@@ -2204,6 +2218,9 @@ export function updateProjectSettings(
       | "executionReasoningEffort"
       | "symphonyMaxConcurrentAgents"
       | "symphonyMaxTurns"
+      | "qaStrictness"
+      | "securityStrictness"
+      | "deploymentTargets"
     >
   >,
 ) {
@@ -2248,6 +2265,24 @@ export function updateProjectSettings(
   const nextExecutionReasoningEffort = normalizeCodexReasoningEffort(
     updates.executionReasoningEffort ?? current.executionReasoningEffort,
   );
+  const nextQaStrictness = clamp(
+    Number(updates.qaStrictness ?? current.qaStrictness),
+    1,
+    5,
+  );
+  const nextSecurityStrictness = clamp(
+    Number(updates.securityStrictness ?? current.securityStrictness),
+    1,
+    5,
+  );
+  const nextDeploymentTargets = (() => {
+    if (!updates.deploymentTargets) {
+      return current.deploymentTargets;
+    }
+
+    const normalized = normalizeDeploymentTargets(updates.deploymentTargets);
+    return normalized.length ? normalized : current.deploymentTargets;
+  })();
   const nextMaxAgents = clamp(
     Number(updates.symphonyMaxConcurrentAgents ?? current.symphonyMaxConcurrentAgents),
     1,
@@ -2270,6 +2305,9 @@ export function updateProjectSettings(
         execution_model = ?,
         planner_reasoning_effort = ?,
         execution_reasoning_effort = ?,
+        qa_strictness = ?,
+        security_strictness = ?,
+        deployment_targets_json = ?,
         symphony_max_concurrent_agents = ?,
         symphony_max_turns = ?,
         updated_at = ?,
@@ -2295,6 +2333,9 @@ export function updateProjectSettings(
       nextExecutionModel,
       nextPlannerReasoningEffort,
       nextExecutionReasoningEffort,
+      nextQaStrictness,
+      nextSecurityStrictness,
+      serialise(nextDeploymentTargets),
       nextMaxAgents,
       nextMaxTurns,
       timestamp,
@@ -2339,6 +2380,10 @@ export function updateProjectSettings(
     }
   })();
 
+  if (current.repoSource !== nextRepoSource) {
+    refreshOperationalProfiles(projectId);
+  }
+
   appendAuditEvent({
     projectId,
     actor: "control-plane",
@@ -2357,6 +2402,9 @@ export function updateProjectSettings(
       executionModel: nextExecutionModel,
       plannerReasoningEffort: nextPlannerReasoningEffort,
       executionReasoningEffort: nextExecutionReasoningEffort,
+      qaStrictness: nextQaStrictness,
+      securityStrictness: nextSecurityStrictness,
+      deploymentTargets: nextDeploymentTargets,
       symphonyMaxConcurrentAgents: nextMaxAgents,
       symphonyMaxTurns: nextMaxTurns,
     },
