@@ -128,4 +128,32 @@ Epic: Verification loop
     );
     expect(verificationEpic?.parentId).toBe(roadmapMilestone?.id ?? null);
   });
+
+  it("does not emit milestone leaf tasks when the milestone already has explicit epics", () => {
+    const result = generatePlanFromSpec(
+      buildSpecIr(`
+# Delivery blueprint
+
+## Foundation
+- Set up the platform baseline
+- Wire the auth layer
+
+### Persistence
+- Create the database schema
+
+### Runtime
+- Add the worker runtime
+`),
+    );
+
+    const milestoneTaskKeys = result.workItems
+      .filter((item) => item.key.startsWith("M1."))
+      .map((item) => item.key);
+    const epicTitles = result.workItems
+      .filter((item) => item.key.startsWith("E"))
+      .map((item) => item.title);
+
+    expect(milestoneTaskKeys).toHaveLength(0);
+    expect(epicTitles).toEqual(expect.arrayContaining(["Persistence", "Runtime"]));
+  });
 });

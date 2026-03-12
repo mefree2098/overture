@@ -92,6 +92,14 @@ export function addTokenUsage(...values: TokenUsage[]) {
   );
 }
 
+export function subtractTokenUsage(total: TokenUsage, baseline: TokenUsage) {
+  return {
+    inputTokens: Math.max(0, total.inputTokens - baseline.inputTokens),
+    outputTokens: Math.max(0, total.outputTokens - baseline.outputTokens),
+    totalTokens: Math.max(0, total.totalTokens - baseline.totalTokens),
+  };
+}
+
 export function maxTokenUsage(left: TokenUsage, right: TokenUsage): TokenUsage {
   return {
     inputTokens: Math.max(left.inputTokens, right.inputTokens),
@@ -100,6 +108,70 @@ export function maxTokenUsage(left: TokenUsage, right: TokenUsage): TokenUsage {
   };
 }
 
+export function tokenUsageAtLeast(left: TokenUsage, right: TokenUsage) {
+  return (
+    left.inputTokens >= right.inputTokens &&
+    left.outputTokens >= right.outputTokens &&
+    left.totalTokens >= right.totalTokens
+  );
+}
+
 export function hasTokenUsage(usage: TokenUsage) {
   return usage.inputTokens > 0 || usage.outputTokens > 0 || usage.totalTokens > 0;
+}
+
+function asPathRecord(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function valueAtPath(value: unknown, path: string[]) {
+  let current: unknown = value;
+
+  for (const segment of path) {
+    const record = asPathRecord(current);
+
+    if (!record || !(segment in record)) {
+      return null;
+    }
+
+    current = record[segment];
+  }
+
+  return current;
+}
+
+const ABSOLUTE_TOKEN_USAGE_PATHS = [
+  ["params", "tokenUsage", "total"],
+  ["tokenUsage", "total"],
+  ["params", "msg", "payload", "info", "total_token_usage"],
+  ["params", "msg", "info", "total_token_usage"],
+  ["msg", "payload", "info", "total_token_usage"],
+  ["msg", "info", "total_token_usage"],
+  ["info", "total_token_usage"],
+];
+
+export function extractAbsoluteTokenUsageFromJsonEvent(value: unknown) {
+  let usage = { ...EMPTY_TOKEN_USAGE };
+
+  for (const path of ABSOLUTE_TOKEN_USAGE_PATHS) {
+    usage = maxTokenUsage(usage, parseTokenUsage(valueAtPath(value, path)));
+  }
+
+  return usage;
+}
+
+export function extractAbsoluteTokenUsageFromJsonLines(output: string) {
+  return output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .reduce<TokenUsage>((usage, line) => {
+      try {
+        return maxTokenUsage(usage, extractAbsoluteTokenUsageFromJsonEvent(JSON.parse(line)));
+      } catch {
+        return usage;
+      }
+    }, { ...EMPTY_TOKEN_USAGE });
 }

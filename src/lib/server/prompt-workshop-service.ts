@@ -65,6 +65,7 @@ export async function sendWorkshopMessage(input: {
     assistantMessage: result.assistantMessage,
     readyForResearch: result.readyForResearch,
     openQuestions: result.openQuestions,
+    tokenUsage: result.tokenUsage,
   });
 
   return {

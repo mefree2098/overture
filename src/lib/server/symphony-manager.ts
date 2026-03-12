@@ -4,7 +4,10 @@ import { accessSync, openSync } from "node:fs";
 import { mkdir, open, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { appendProjectTokenUsageBySlug } from "@/lib/server/project-token-usage";
+import {
+  appendProjectTokenUsageBySlug,
+  getStoredProjectTokenUsageBySlug,
+} from "@/lib/server/project-token-usage";
 import {
   getSymphonyTrackerToken,
   normalizeRepoSource,
@@ -22,6 +25,8 @@ import {
   hasTokenUsage,
   maxTokenUsage,
   parseTokenUsage,
+  subtractTokenUsage,
+  tokenUsageAtLeast,
   type TokenUsage,
 } from "@/lib/token-usage";
 
@@ -93,6 +98,7 @@ type PersistedSymphonyRuntime = {
   bootstrapLogPath: string;
   startedAt: string;
   lastObservedTokenUsage: TokenUsage;
+  persistedProjectTokenUsage: TokenUsage | null;
   projectTokenUsageArchivedAt: string | null;
 };
 
@@ -398,6 +404,9 @@ async function readRuntimeFile(projectSlug: string) {
       bootstrapLogPath: String(payload.bootstrapLogPath ?? ""),
       startedAt: String(payload.startedAt ?? ""),
       lastObservedTokenUsage: parseTokenUsage(payload.lastObservedTokenUsage),
+      persistedProjectTokenUsage: hasTokenUsage(parseTokenUsage(payload.persistedProjectTokenUsage))
+        ? parseTokenUsage(payload.persistedProjectTokenUsage)
+        : null,
       projectTokenUsageArchivedAt:
         typeof payload.projectTokenUsageArchivedAt === "string" &&
         payload.projectTokenUsageArchivedAt.trim()
@@ -432,20 +441,49 @@ function sameTokenUsage(left: TokenUsage, right: TokenUsage) {
   );
 }
 
+function resolvedPersistedProjectTokenUsage(
+  projectSlug: string,
+  runtime: PersistedSymphonyRuntime,
+) {
+  if (runtime.persistedProjectTokenUsage) {
+    return runtime.persistedProjectTokenUsage;
+  }
+
+  if (!runtime.projectTokenUsageArchivedAt) {
+    return { ...EMPTY_TOKEN_USAGE };
+  }
+
+  const currentProjectUsage = getStoredProjectTokenUsageBySlug(projectSlug);
+  return tokenUsageAtLeast(currentProjectUsage, runtime.lastObservedTokenUsage)
+    ? runtime.lastObservedTokenUsage
+    : { ...EMPTY_TOKEN_USAGE };
+}
+
 async function persistObservedTokenUsage(
   projectSlug: string,
   runtime: PersistedSymphonyRuntime,
   state: Record<string, unknown>,
 ) {
   const observed = maxTokenUsage(runtime.lastObservedTokenUsage, tokenUsageFromState(state));
+  const persisted = resolvedPersistedProjectTokenUsage(projectSlug, runtime);
+  const delta = subtractTokenUsage(observed, persisted);
 
-  if (sameTokenUsage(observed, runtime.lastObservedTokenUsage)) {
+  if (
+    sameTokenUsage(observed, runtime.lastObservedTokenUsage) &&
+    sameTokenUsage(persisted, runtime.persistedProjectTokenUsage ?? EMPTY_TOKEN_USAGE) &&
+    !hasTokenUsage(delta)
+  ) {
     return runtime;
+  }
+
+  if (hasTokenUsage(delta)) {
+    appendProjectTokenUsageBySlug(projectSlug, delta);
   }
 
   const next = {
     ...runtime,
     lastObservedTokenUsage: observed,
+    persistedProjectTokenUsage: observed,
   } satisfies PersistedSymphonyRuntime;
 
   await writeRuntimeFile(projectSlug, next);
@@ -456,16 +494,20 @@ async function archiveObservedTokenUsage(
   projectSlug: string,
   runtime: PersistedSymphonyRuntime,
 ) {
-  if (runtime.projectTokenUsageArchivedAt) {
+  const persisted = resolvedPersistedProjectTokenUsage(projectSlug, runtime);
+  const delta = subtractTokenUsage(runtime.lastObservedTokenUsage, persisted);
+
+  if (runtime.projectTokenUsageArchivedAt && !hasTokenUsage(delta)) {
     return runtime;
   }
 
-  if (hasTokenUsage(runtime.lastObservedTokenUsage)) {
-    appendProjectTokenUsageBySlug(projectSlug, runtime.lastObservedTokenUsage);
+  if (hasTokenUsage(delta)) {
+    appendProjectTokenUsageBySlug(projectSlug, delta);
   }
 
   const next = {
     ...runtime,
+    persistedProjectTokenUsage: runtime.lastObservedTokenUsage,
     projectTokenUsageArchivedAt: new Date().toISOString(),
   } satisfies PersistedSymphonyRuntime;
 
@@ -590,6 +632,7 @@ export async function startSymphonyForProject(project: ProjectRecord, origin: st
     bootstrapLogPath: paths.bootstrapLogPath,
     startedAt: new Date().toISOString(),
     lastObservedTokenUsage: EMPTY_TOKEN_USAGE,
+    persistedProjectTokenUsage: EMPTY_TOKEN_USAGE,
     projectTokenUsageArchivedAt: null,
   } satisfies PersistedSymphonyRuntime;
 
@@ -652,7 +695,7 @@ export async function stopSymphonyForProject(projectSlug: string) {
 
   const persistedRuntime = await readRuntimeFile(projectSlug);
 
-  if (persistedRuntime && !persistedRuntime.projectTokenUsageArchivedAt) {
+  if (persistedRuntime) {
     await archiveObservedTokenUsage(projectSlug, persistedRuntime);
   }
 

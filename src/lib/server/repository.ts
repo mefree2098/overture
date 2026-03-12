@@ -8,12 +8,16 @@ import {
   normalizeResearchProvider,
   normalizeWorkshopSearchMode,
 } from "@/lib/project-pipeline";
+import { hasTokenUsage, maxTokenUsage, parseTokenUsage, subtractTokenUsage } from "@/lib/token-usage";
 import { getAppSettings } from "@/lib/server/app-settings";
 import { getDb } from "@/lib/server/db";
 import { detectOperationalProfiles } from "@/lib/server/launch-profiles";
 import { buildSpecIrWithLlm } from "@/lib/server/llm-planner";
 import { generatePlanFromSpec } from "@/lib/server/plan-generator";
-import { hydrateStoredProjectTokenUsage } from "@/lib/server/project-token-usage";
+import {
+  appendProjectTokenUsageBySlug,
+  hydrateStoredProjectTokenUsage,
+} from "@/lib/server/project-token-usage";
 import { normalizeRepoSource } from "@/lib/server/runtime-config";
 import { getContentHash } from "@/lib/server/spec-parser";
 import { stopSymphonyForProject } from "@/lib/server/symphony-manager";
@@ -107,6 +111,14 @@ function hydrateProjectDependencies(projectId: string) {
 
 function isTerminalWorkItemStatus(status: WorkItemStatus) {
   return status === "done" || status === "waived";
+}
+
+function workItemLane(workItem: WorkItemRecord) {
+  return typeof workItem.metadata.lane === "string" ? String(workItem.metadata.lane) : null;
+}
+
+function shouldAutoAdvanceWorkItem(workItem: WorkItemRecord) {
+  return workItemLane(workItem) === "epic";
 }
 
 function resolveGateSnapshot(
@@ -1161,6 +1173,11 @@ export function recordWorkshopTurn(input: {
   assistantMessage: string;
   readyForResearch: boolean;
   openQuestions: string[];
+  tokenUsage?: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+  } | null;
 }) {
   const db = getDb();
   const project = db
@@ -1182,9 +1199,18 @@ export function recordWorkshopTurn(input: {
     .get(input.projectId, input.codexThreadId) as Record<string, unknown> | undefined;
   const timestamp = nowIso();
   const workshopThreadId = existing ? String(existing.id) : randomUUID();
+  const existingMetadata = existing
+    ? tryParseJson<Record<string, unknown>>(existing.metadata_json as string)
+    : null;
+  const previousTokenUsage = parseTokenUsage(existingMetadata?.tokenUsageTotal);
+  const latestTokenUsage = input.tokenUsage
+    ? maxTokenUsage(previousTokenUsage, input.tokenUsage)
+    : previousTokenUsage;
+  const tokenUsageDelta = subtractTokenUsage(latestTokenUsage, previousTokenUsage);
   const metadata = {
     readyForResearch: input.readyForResearch,
     openQuestions: input.openQuestions,
+    tokenUsageTotal: hasTokenUsage(latestTokenUsage) ? latestTokenUsage : null,
   };
 
   db.transaction(() => {
@@ -1255,6 +1281,8 @@ export function recordWorkshopTurn(input: {
       serialise({
         openQuestions: input.openQuestions,
         readyForResearch: input.readyForResearch,
+        tokenUsageTotal: hasTokenUsage(latestTokenUsage) ? latestTokenUsage : null,
+        tokenUsageDelta: hasTokenUsage(tokenUsageDelta) ? tokenUsageDelta : null,
       }),
       timestamp,
     );
@@ -1274,6 +1302,10 @@ export function recordWorkshopTurn(input: {
     );
   })();
 
+  if (hasTokenUsage(tokenUsageDelta)) {
+    appendProjectTokenUsageBySlug(String(project.slug), tokenUsageDelta);
+  }
+
   appendAuditEvent({
     projectId: input.projectId,
     actor: "workshop",
@@ -1285,6 +1317,7 @@ export function recordWorkshopTurn(input: {
       codexThreadId: input.codexThreadId,
       readyForResearch: input.readyForResearch,
       openQuestions: input.openQuestions,
+      tokenUsage: hasTokenUsage(tokenUsageDelta) ? tokenUsageDelta : null,
     },
   });
 
@@ -1861,31 +1894,50 @@ export function advanceQueuedWorkItems(projectId: string) {
   const dependencies = hydrateProjectDependencies(projectId);
 
   const byId = new Map(workItems.map((workItem) => [workItem.id, workItem]));
+  const blockersByWorkItemId = new Map<string, WorkItemRecord[]>();
+
+  for (const edge of dependencies) {
+    const blocker = byId.get(edge.fromWorkItemId);
+    if (!blocker) {
+      continue;
+    }
+
+    const blockers = blockersByWorkItemId.get(edge.toWorkItemId) ?? [];
+    blockers.push(blocker);
+    blockersByWorkItemId.set(edge.toWorkItemId, blockers);
+  }
+
   const updateStatus = db.prepare(
     "UPDATE work_items SET status = ?, updated_at = ? WHERE id = ?",
   );
   let changed = false;
+  let settled = false;
 
-  for (const workItem of workItems) {
-    if (
-      isTerminalWorkItemStatus(workItem.status) ||
-      workItem.status === "in_progress" ||
-      workItem.status === "verifying" ||
-      workItem.status === "awaiting_review"
-    ) {
-      continue;
-    }
+  while (!settled) {
+    settled = true;
 
-    const blockers = dependencies
-      .filter((edge) => edge.toWorkItemId === workItem.id)
-      .map((edge) => byId.get(edge.fromWorkItemId))
-      .filter(Boolean) as WorkItemRecord[];
-    const isReady = blockers.every((blocker) => isTerminalWorkItemStatus(blocker.status));
-    const nextStatus = isReady ? "queued" : "blocked";
+    for (const workItem of workItems) {
+      const blockers = blockersByWorkItemId.get(workItem.id) ?? [];
+      const isReady = blockers.every((blocker) => isTerminalWorkItemStatus(blocker.status));
+      let nextStatus: WorkItemStatus | null = null;
 
-    if (nextStatus !== workItem.status) {
-      updateStatus.run(nextStatus, nowIso(), workItem.id);
-      changed = true;
+      if (shouldAutoAdvanceWorkItem(workItem) && !isTerminalWorkItemStatus(workItem.status)) {
+        nextStatus = isReady ? "done" : "blocked";
+      } else if (
+        !isTerminalWorkItemStatus(workItem.status) &&
+        workItem.status !== "in_progress" &&
+        workItem.status !== "verifying" &&
+        workItem.status !== "awaiting_review"
+      ) {
+        nextStatus = isReady ? "queued" : "blocked";
+      }
+
+      if (nextStatus && nextStatus !== workItem.status) {
+        updateStatus.run(nextStatus, nowIso(), workItem.id);
+        workItem.status = nextStatus;
+        changed = true;
+        settled = false;
+      }
     }
   }
 
@@ -2306,7 +2358,7 @@ async function ingestProjectPlan(input: {
   const specDocumentId = randomUUID();
   const planVersionId = randomUUID();
   const timestamp = nowIso();
-  const specIr = await buildSpecIrWithLlm({
+  const { specIr, tokenUsage: plannerTokenUsage } = await buildSpecIrWithLlm({
     name: input.name,
     executionMode: input.executionMode,
     specText: input.specText,
@@ -2522,6 +2574,10 @@ async function ingestProjectPlan(input: {
       executionReasoningEffort: input.executionReasoningEffort,
     },
   });
+
+  if (plannerTokenUsage) {
+    appendProjectTokenUsageBySlug(input.slug, plannerTokenUsage);
+  }
 
   refreshOperationalProfiles(input.projectId);
   settleProjectState(input.projectId);

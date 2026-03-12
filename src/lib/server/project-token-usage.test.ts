@@ -39,9 +39,12 @@ const SPEC_IR: SpecIR = {
 describe("project token usage storage", () => {
   const originalEnv = { ...process.env };
   let runtimeRoot = "";
+  let plannerTokenUsage: { inputTokens: number; outputTokens: number; totalTokens: number } | null =
+    null;
 
   beforeEach(() => {
     vi.resetModules();
+    plannerTokenUsage = null;
     runtimeRoot = mkdtempSync(path.join(tmpdir(), "overture-project-tokens-test-"));
     const dbPath = path.join(runtimeRoot, "db", "overture.test.db");
     process.env.OVERTURE_ROOT = runtimeRoot;
@@ -49,7 +52,10 @@ describe("project token usage storage", () => {
     mkdirSync(path.dirname(dbPath), { recursive: true });
 
     vi.doMock("@/lib/server/llm-planner", () => ({
-      buildSpecIrWithLlm: vi.fn(async () => SPEC_IR),
+      buildSpecIrWithLlm: vi.fn(async () => ({
+        specIr: SPEC_IR,
+        tokenUsage: plannerTokenUsage,
+      })),
     }));
     vi.doMock("@/lib/server/symphony-manager", () => ({
       stopSymphonyForProject: vi.fn(async () => ({ stopped: true })),
@@ -95,5 +101,27 @@ describe("project token usage storage", () => {
       outputTokens: 35,
       totalTokens: 175,
     });
+  });
+
+  it("stores planner token usage during plan ingestion", async () => {
+    plannerTokenUsage = {
+      inputTokens: 90,
+      outputTokens: 15,
+      totalTokens: 105,
+    };
+
+    const repository = await import("@/lib/server/repository");
+
+    const created = await repository.createProjectFromSpec({
+      name: "Planner Usage",
+      repoSource: ".",
+      executionMode: "local_chatgpt",
+      specFilename: "plan.md",
+      specText: "# Blueprint\n\n## Goal\nPersist planner token totals",
+    });
+
+    const snapshot = repository.getProjectSnapshot(created.projectId);
+
+    expect(snapshot?.project.cumulativeTokenUsage).toEqual(plannerTokenUsage);
   });
 });

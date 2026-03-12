@@ -12,6 +12,7 @@ import {
   normalizeRepoSource,
   resolveCodexBin,
 } from "@/lib/server/runtime-config";
+import { extractAbsoluteTokenUsageFromJsonLines, hasTokenUsage } from "@/lib/token-usage";
 import type { ProjectRecord, WorkshopSearchMode } from "@/lib/types";
 
 const researchBundleSchema = z.object({
@@ -116,6 +117,7 @@ async function runCodexNativeResearch(input: {
     schemaPath,
     "--output-last-message",
     resultPath,
+    "--json",
     "--cd",
     normalizeRepoSource(input.project.repoSource),
   ];
@@ -125,6 +127,8 @@ async function runCodexNativeResearch(input: {
   }
 
   args.push("-");
+  let stdout = "";
+  let stderr = "";
 
   await new Promise<void>((resolve, reject) => {
     const child = spawn(resolveCodexBin(), args, {
@@ -132,8 +136,6 @@ async function runCodexNativeResearch(input: {
       env: process.env,
       stdio: ["pipe", "pipe", "pipe"],
     });
-    let stdout = "";
-    let stderr = "";
 
     child.stdout.on("data", (chunk) => {
       stdout += chunk.toString();
@@ -168,11 +170,15 @@ async function runCodexNativeResearch(input: {
   });
 
   try {
+    const tokenUsage = extractAbsoluteTokenUsageFromJsonLines(stdout);
     const bundle = researchBundleSchema.parse(
       JSON.parse(await readFile(resultPath, "utf8")),
     );
 
-    return normalizeResearchBundle(bundle);
+    return normalizeResearchBundle({
+      ...bundle,
+      tokenUsage: hasTokenUsage(tokenUsage) ? tokenUsage : null,
+    });
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

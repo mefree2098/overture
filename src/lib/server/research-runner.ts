@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { buildResearchSummaryJson } from "@/lib/server/research-artifacts";
+import { appendProjectTokenUsageBySlug } from "@/lib/server/project-token-usage";
 import { buildResearchPrompt } from "@/lib/server/research-prompt-builder";
 import { runResearchProvider } from "@/lib/server/research-provider";
 import {
@@ -64,6 +65,10 @@ export async function runProjectResearch(input: {
         repoSummary: snapshot.project.repoSource,
       }),
     });
+
+    if (bundle.tokenUsage) {
+      appendProjectTokenUsageBySlug(snapshot.project.slug, bundle.tokenUsage);
+    }
 
     const reportArtifactId = writeArtifact({
       projectId: snapshot.project.id,

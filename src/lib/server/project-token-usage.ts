@@ -21,9 +21,20 @@ export function hydrateStoredProjectTokenUsage(row: Record<string, unknown>): To
   };
 }
 
+export function getStoredProjectTokenUsageBySlug(projectSlug: string) {
+  const db = getDb();
+  const row = db
+    .prepare(
+      "SELECT cumulative_input_tokens, cumulative_output_tokens, cumulative_total_tokens FROM projects WHERE slug = ?",
+    )
+    .get(projectSlug) as Record<string, unknown> | undefined;
+
+  return row ? hydrateStoredProjectTokenUsage(row) : EMPTY_TOKEN_USAGE;
+}
+
 export function appendProjectTokenUsageBySlug(projectSlug: string, usage: TokenUsage) {
   if (!hasTokenUsage(usage)) {
-    return EMPTY_TOKEN_USAGE;
+    return getStoredProjectTokenUsageBySlug(projectSlug);
   }
 
   const db = getDb();
@@ -49,9 +60,5 @@ export function appendProjectTokenUsageBySlug(projectSlug: string, usage: TokenU
     projectSlug,
   );
 
-  const row = db
-    .prepare("SELECT cumulative_input_tokens, cumulative_output_tokens, cumulative_total_tokens FROM projects WHERE slug = ?")
-    .get(projectSlug) as Record<string, unknown> | undefined;
-
-  return row ? hydrateStoredProjectTokenUsage(row) : EMPTY_TOKEN_USAGE;
+  return getStoredProjectTokenUsageBySlug(projectSlug);
 }

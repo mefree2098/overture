@@ -13,6 +13,11 @@ import {
   resolveCodexBin,
 } from "@/lib/server/runtime-config";
 import { buildSpecIr } from "@/lib/server/spec-parser";
+import {
+  extractAbsoluteTokenUsageFromJsonLines,
+  hasTokenUsage,
+  type TokenUsage,
+} from "@/lib/token-usage";
 import type {
   CodexReasoningEffort,
   CreateProjectInput,
@@ -175,7 +180,11 @@ function buildPlannerPrompt(input: Pick<CreateProjectInput, "name" | "executionM
     "Return exactly one JSON object matching the provided schema. Do not emit markdown, code fences, or commentary.",
     "Do not browse the web, do not use tools, and do not rely on any external context outside the provided plan.",
     "Interpret research prose into concrete engineering work.",
+    "Keep the plan lean: prefer the fewest tickets that still preserve independent execution and verification.",
     "Milestones must be top-level execution bundles. Epics must attach to milestones using milestoneName whenever possible.",
+    "Do not duplicate the same work at milestone and epic level.",
+    "If a milestone has epics, only use milestone.tasks for true cross-cutting prerequisites or sequence gates; otherwise leave milestone.tasks empty.",
+    "Combine closely related implementation steps instead of turning every sentence into a ticket.",
     "Task titles must be short, concrete, and implementation-ready.",
     "Preserve important QA, security, deployment, platform, and UX obligations from the source plan.",
     "Ignore citation markers and focus on actionable delivery work.",
@@ -195,7 +204,7 @@ function runCodexPlanner(
   schemaPath: string,
   resultPath: string,
 ) {
-  return new Promise<void>((resolve, reject) => {
+  return new Promise<TokenUsage>((resolve, reject) => {
     const codexBin = resolveCodexBin();
     const timeoutMs = Number(process.env.OVERTURE_LLM_PLANNER_TIMEOUT_MS ?? 180000);
     const approvalPolicyArg = 'approval_policy="never"';
@@ -222,6 +231,7 @@ function runCodexPlanner(
       schemaPath,
       "--output-last-message",
       resultPath,
+      "--json",
       "--cd",
       getWorkspaceRoot(),
     ];
@@ -272,7 +282,7 @@ function runCodexPlanner(
       clearTimeout(timer);
 
       if (code === 0) {
-        resolve();
+        resolve(extractAbsoluteTokenUsageFromJsonLines(stdout));
         return;
       }
 
@@ -300,7 +310,7 @@ export async function buildSpecIrWithLlm(
     CreateProjectInput,
     "name" | "executionMode" | "specText" | "plannerModel" | "plannerReasoningEffort"
   >,
-): Promise<SpecIR> {
+): Promise<{ specIr: SpecIR; tokenUsage: TokenUsage | null }> {
   if (!codexCliAvailable()) {
     throw new Error("Codex CLI is not installed or not available on PATH.");
   }
@@ -325,37 +335,40 @@ export async function buildSpecIrWithLlm(
   await writeFile(schemaPath, JSON.stringify(plannerJsonSchema, null, 2), "utf8");
 
   try {
-    await runCodexPlanner(input, schemaPath, resultPath);
+    const tokenUsage = await runCodexPlanner(input, schemaPath, resultPath);
     const parsed = plannerOutputSchema.parse(
       JSON.parse(await readFile(resultPath, "utf8")),
     );
 
     return {
-      summary: parsed.summary.trim(),
-      outline: structural.outline,
-      sections: structural.sections,
-      features: unique([
-        ...parsed.features,
-        ...parsed.milestones.map((milestone) => milestone.name),
-        ...parsed.epics.map((epic) => epic.name),
-      ]),
-      roles: unique(parsed.roles),
-      entities: unique(parsed.entities),
-      integrations: unique(parsed.integrations),
-      constraints: unique(parsed.constraints),
-      risks: unique(parsed.risks),
-      acceptanceCriteria: unique(parsed.acceptanceCriteria),
-      deploymentTargets: normalizeDeploymentTargets(parsed.deploymentTargets),
-      milestones: parsed.milestones.map((milestone) => ({
-        name: milestone.name.trim(),
-        tasks: unique(milestone.tasks),
-      })),
-      epics: parsed.epics.map((epic) => ({
-        name: epic.name.trim(),
-        milestoneName: epic.milestoneName?.trim() ?? null,
-        tasks: unique(epic.tasks),
-      })),
-      openQuestions: unique(parsed.openQuestions),
+      specIr: {
+        summary: parsed.summary.trim(),
+        outline: structural.outline,
+        sections: structural.sections,
+        features: unique([
+          ...parsed.features,
+          ...parsed.milestones.map((milestone) => milestone.name),
+          ...parsed.epics.map((epic) => epic.name),
+        ]),
+        roles: unique(parsed.roles),
+        entities: unique(parsed.entities),
+        integrations: unique(parsed.integrations),
+        constraints: unique(parsed.constraints),
+        risks: unique(parsed.risks),
+        acceptanceCriteria: unique(parsed.acceptanceCriteria),
+        deploymentTargets: normalizeDeploymentTargets(parsed.deploymentTargets),
+        milestones: parsed.milestones.map((milestone) => ({
+          name: milestone.name.trim(),
+          tasks: unique(milestone.tasks),
+        })),
+        epics: parsed.epics.map((epic) => ({
+          name: epic.name.trim(),
+          milestoneName: epic.milestoneName?.trim() ?? null,
+          tasks: unique(epic.tasks),
+        })),
+        openQuestions: unique(parsed.openQuestions),
+      },
+      tokenUsage: hasTokenUsage(tokenUsage) ? tokenUsage : null,
     };
   } finally {
     await rm(tempDir, { recursive: true, force: true });

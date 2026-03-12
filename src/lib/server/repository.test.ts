@@ -51,8 +51,11 @@ describe("repository lifecycle", () => {
 
     vi.doMock("@/lib/server/llm-planner", () => ({
       buildSpecIrWithLlm: vi.fn(async (input: { name: string }) => ({
-        ...SPEC_IR,
-        summary: `Build ${input.name} as a delivery blueprint for validating project creation and deletion across persisted runtime state.`,
+        specIr: {
+          ...SPEC_IR,
+          summary: `Build ${input.name} as a delivery blueprint for validating project creation and deletion across persisted runtime state.`,
+        },
+        tokenUsage: null,
       })),
     }));
     vi.doMock("@/lib/server/symphony-manager", () => ({
@@ -324,6 +327,62 @@ describe("repository lifecycle", () => {
     expect(completedEvent?.payload.researchRunId).toBe(researchRunId);
   });
 
+  it("stores only the workshop token delta for repeated turns on the same Codex thread", async () => {
+    const repository = await import("@/lib/server/repository");
+
+    const created = repository.createDraftProject({
+      name: "Workshop Tokens",
+      repoSource: ".",
+      executionMode: "local_chatgpt",
+    });
+
+    repository.recordWorkshopTurn({
+      projectId: created.projectId,
+      codexThreadId: "thread-workshop-tokens",
+      title: "Prompt workshop",
+      searchMode: "cached",
+      promptDraft: "Prompt v1",
+      summary: "Summary v1",
+      repoContext: ".",
+      userMessage: "First turn",
+      assistantMessage: "First reply",
+      readyForResearch: false,
+      openQuestions: [],
+      tokenUsage: {
+        inputTokens: 120,
+        outputTokens: 30,
+        totalTokens: 150,
+      },
+    });
+
+    repository.recordWorkshopTurn({
+      projectId: created.projectId,
+      codexThreadId: "thread-workshop-tokens",
+      title: "Prompt workshop",
+      searchMode: "cached",
+      promptDraft: "Prompt v2",
+      summary: "Summary v2",
+      repoContext: ".",
+      userMessage: "Second turn",
+      assistantMessage: "Second reply",
+      readyForResearch: true,
+      openQuestions: [],
+      tokenUsage: {
+        inputTokens: 150,
+        outputTokens: 45,
+        totalTokens: 195,
+      },
+    });
+
+    const snapshot = repository.getProjectSnapshot(created.projectId);
+
+    expect(snapshot?.project.cumulativeTokenUsage).toEqual({
+      inputTokens: 150,
+      outputTokens: 45,
+      totalTokens: 195,
+    });
+  });
+
   it("keeps launch and deploy profile ids stable across snapshot refreshes", async () => {
     const repository = await import("@/lib/server/repository");
 
@@ -344,5 +403,38 @@ describe("repository lifecycle", () => {
     expect(first?.deployProfiles.map((profile) => profile.id)).toEqual(
       second?.deployProfiles.map((profile) => profile.id),
     );
+  });
+
+  it("auto-advances epic containers and queues their leaf tasks after a milestone closes", async () => {
+    const repository = await import("@/lib/server/repository");
+
+    const created = await repository.createProjectFromSpec({
+      name: "Epic Auto Advance",
+      repoSource: ".",
+      executionMode: "local_chatgpt",
+      specFilename: "plan.md",
+      specText: "# Blueprint\n\n## Core lifecycle\n- Create and delete projects cleanly",
+    });
+
+    const initial = repository.getProjectSnapshot(created.projectId);
+    const milestone = initial?.workItems.find((item) => item.metadata.lane === "milestone");
+    const epic = initial?.workItems.find((item) => item.metadata.lane === "epic");
+    const milestoneLeafTask = initial?.workItems.find((item) => item.key === "M1.1");
+
+    expect(milestone).toBeDefined();
+    expect(epic?.status).toBe("blocked");
+    expect(milestoneLeafTask).toBeUndefined();
+
+    repository.updateWorkItemFromTracker({
+      issueId: milestone!.id,
+      stateId: "state-done",
+    });
+
+    const settled = repository.getProjectSnapshot(created.projectId);
+    const settledEpic = settled?.workItems.find((item) => item.metadata.lane === "epic");
+    const settledEpicLeaf = settled?.workItems.find((item) => item.key === "E1.1");
+
+    expect(settledEpic?.status).toBe("done");
+    expect(settledEpicLeaf?.status).toBe("queued");
   });
 });

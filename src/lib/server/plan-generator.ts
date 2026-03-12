@@ -114,6 +114,10 @@ export function generatePlanFromSpec(specIr: SpecIR): PlanGenerationResult {
   specIr.milestones.forEach((milestone, milestoneIndex) => {
     const milestoneId = makeId("milestone", milestoneIndex);
     const attachedEpicNames = epicNamesByMilestone.get(milestone.name) ?? new Set<string>();
+    const milestoneTaskTitles =
+      attachedEpicNames.size > 0
+        ? []
+        : milestone.tasks.filter((taskTitle) => !attachedEpicNames.has(taskTitle));
     workItems.push(
       createWorkItem({
         id: milestoneId,
@@ -138,9 +142,7 @@ export function generatePlanFromSpec(specIr: SpecIR): PlanGenerationResult {
     }
 
     let previousTaskId: string | null = milestoneId;
-    milestone.tasks
-      .filter((taskTitle) => !attachedEpicNames.has(taskTitle))
-      .forEach((taskTitle, taskIndex) => {
+    milestoneTaskTitles.forEach((taskTitle, taskIndex) => {
       const taskId = makeId(`milestone-${milestoneIndex + 1}-task`, taskIndex);
       workItems.push(
         createWorkItem({
@@ -165,7 +167,7 @@ export function generatePlanFromSpec(specIr: SpecIR): PlanGenerationResult {
         dependencyEdges.push(createEdge(edgeOrder++, previousTaskId, taskId));
       }
       previousTaskId = taskId;
-      });
+    });
 
     previousMilestoneId = milestoneId;
   });
