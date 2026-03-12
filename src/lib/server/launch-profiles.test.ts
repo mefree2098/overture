@@ -77,13 +77,21 @@ describe("detectOperationalProfiles", () => {
     );
   });
 
-  it("does not expose scripted cloud deploy targets unless deploy.sh exists", () => {
+  it("exposes cloud deploy targets when deploy.sh and the cloud infra assets are present", () => {
     mkdirSync(path.join(repoRoot, "infra", "aws"), { recursive: true });
     writeFileSync(path.join(repoRoot, "infra", "aws", "template.yaml"), "Resources: {}\n", "utf8");
+    mkdirSync(path.join(repoRoot, "infra", "azure"), { recursive: true });
+    writeFileSync(path.join(repoRoot, "infra", "azure", "main.bicep"), "param foo string\n", "utf8");
+    writeFileSync(path.join(repoRoot, "deploy.sh"), "#!/usr/bin/env bash\n", "utf8");
 
     const detected = detectOperationalProfiles(makeProject(repoRoot));
 
-    expect(detected.deployProfiles.find((profile) => profile.target === "aws")).toBeUndefined();
+    expect(detected.deployProfiles.find((profile) => profile.target === "aws")?.command).toBe(
+      "bash deploy.sh aws",
+    );
+    expect(detected.deployProfiles.find((profile) => profile.target === "azure")?.command).toBe(
+      "bash deploy.sh azure",
+    );
   });
 
   it("uses workspace-aware xcodebuild commands when an xcworkspace is present", () => {

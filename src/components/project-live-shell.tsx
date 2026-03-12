@@ -32,6 +32,7 @@ import type {
   CodexReasoningEffort,
   GateVerdict,
   ExecutionMode,
+  FindingRecord,
   ProjectSnapshot,
 } from "@/lib/types";
 import {
@@ -130,10 +131,12 @@ function GateCard({
   label,
   status,
   description,
+  note,
 }: {
   label: string;
   status: GateVerdict;
   description: string;
+  note?: string | null;
 }) {
   return (
     <div className="rounded-[24px] border border-white/8 bg-white/4 p-4">
@@ -143,11 +146,19 @@ function GateCard({
             {label}
           </p>
           <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">{description}</p>
+          {note ? (
+            <p className="mt-3 text-sm leading-6 text-amber-100/85">{note}</p>
+          ) : null}
         </div>
         <StatusPill status={status} />
       </div>
     </div>
   );
+}
+
+function gateSummaryReason(summary: Record<string, unknown>, key: "qa" | "security" | "deploy" | "release") {
+  const value = summary[`${key}Reason`];
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
 }
 
 function TabButton({
@@ -494,6 +505,15 @@ function nextStepForProject({
     };
   }
 
+  if (releaseStatus === "partial") {
+    return {
+      title: "Release verification is still partial",
+      detail:
+        "One or more gates still need stronger evidence or include cloud targets that require operator-side live validation.",
+      tone: "warning" as const,
+    };
+  }
+
   if (activeIssues > 0) {
     return {
       title: "The automated run is underway",
@@ -549,6 +569,20 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
   const [projectSettingsSaved, setProjectSettingsSaved] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [securityReviewBusy, setSecurityReviewBusy] = useState(false);
+  const [securityReviewError, setSecurityReviewError] = useState<string | null>(null);
+  const [securityReviewSaved, setSecurityReviewSaved] = useState<string | null>(null);
+  const [findingCategoryDraft, setFindingCategoryDraft] =
+    useState<Extract<FindingRecord["category"], "qa" | "security" | "deploy">>("security");
+  const [findingSeverityDraft, setFindingSeverityDraft] =
+    useState<FindingRecord["severity"]>("medium");
+  const [findingTitleDraft, setFindingTitleDraft] = useState("");
+  const [findingDetailDraft, setFindingDetailDraft] = useState("");
+  const [findingBusy, setFindingBusy] = useState(false);
+  const [findingError, setFindingError] = useState<string | null>(null);
+  const [findingSaved, setFindingSaved] = useState<string | null>(null);
+  const [findingStatusBusyId, setFindingStatusBusyId] = useState<string | null>(null);
+  const [findingStatusError, setFindingStatusError] = useState<string | null>(null);
 
   const openFindings = snapshot.findings.filter(
     (finding) => !["resolved", "accepted_risk"].includes(finding.status),
@@ -637,6 +671,10 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
     releaseStatus: snapshot.gateStatus.releaseStatus,
     activeIssues: activeIssues.length,
   });
+  const qaGateReason = gateSummaryReason(snapshot.gateStatus.summary, "qa");
+  const securityGateReason = gateSummaryReason(snapshot.gateStatus.summary, "security");
+  const deployGateReason = gateSummaryReason(snapshot.gateStatus.summary, "deploy");
+  const releaseGateReason = gateSummaryReason(snapshot.gateStatus.summary, "release");
 
   useEffect(() => {
     setSnapshot(initialSnapshot);
@@ -722,6 +760,16 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
     }
   }, [snapshot.symphony?.running]);
 
+  async function refreshSnapshot() {
+    const response = await fetch(`/api/projects/${snapshot.project.id}/snapshot`, {
+      cache: "no-store",
+    });
+
+    if (response.ok) {
+      setSnapshot((await response.json()) as ProjectSnapshot);
+    }
+  }
+
   function runExecution() {
     setRunning(true);
     setRunError(null);
@@ -740,13 +788,7 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
           throw new Error(payload.error ?? "Failed to start the automated run.");
         }
 
-        const refresh = await fetch(`/api/projects/${snapshot.project.id}/snapshot`, {
-          cache: "no-store",
-        });
-
-        if (refresh.ok) {
-          setSnapshot((await refresh.json()) as ProjectSnapshot);
-        }
+        await refreshSnapshot();
       } catch (error) {
         setRunError(
           error instanceof Error ? error.message : "Failed to start the automated run.",
@@ -785,13 +827,7 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
           throw new Error(payload.error ?? "Failed to rename project.");
         }
 
-        const refresh = await fetch(`/api/projects/${snapshot.project.id}/snapshot`, {
-          cache: "no-store",
-        });
-
-        if (refresh.ok) {
-          setSnapshot((await refresh.json()) as ProjectSnapshot);
-        }
+        await refreshSnapshot();
 
         router.refresh();
       } catch (error) {
@@ -835,13 +871,7 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
           throw new Error(payload.error ?? "Failed to update project settings.");
         }
 
-        const refresh = await fetch(`/api/projects/${snapshot.project.id}/snapshot`, {
-          cache: "no-store",
-        });
-
-        if (refresh.ok) {
-          setSnapshot((await refresh.json()) as ProjectSnapshot);
-        }
+        await refreshSnapshot();
 
         router.refresh();
         setProjectSettingsSaved(
@@ -855,6 +885,119 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
         );
       } finally {
         setProjectSettingsSaving(false);
+      }
+    });
+  }
+
+  function runSecurityReview() {
+    setSecurityReviewBusy(true);
+    setSecurityReviewError(null);
+    setSecurityReviewSaved(null);
+
+    startTransition(async () => {
+      try {
+        const response = await fetch(`/api/projects/${snapshot.project.id}/security`, {
+          method: "POST",
+        });
+        const payload = (await response.json().catch(() => ({}))) as {
+          error?: string;
+          summary?: string;
+        };
+
+        if (!response.ok) {
+          throw new Error(payload.error ?? "Failed to run the security review.");
+        }
+
+        await refreshSnapshot();
+        setSecurityReviewSaved(payload.summary ?? "Security review completed.");
+        setActiveTab("overview");
+      } catch (error) {
+        setSecurityReviewError(
+          error instanceof Error ? error.message : "Failed to run the security review.",
+        );
+      } finally {
+        setSecurityReviewBusy(false);
+      }
+    });
+  }
+
+  function createManualFinding() {
+    if (!findingTitleDraft.trim() || !findingDetailDraft.trim()) {
+      setFindingError("A title and detail are required.");
+      return;
+    }
+
+    setFindingBusy(true);
+    setFindingError(null);
+    setFindingSaved(null);
+
+    startTransition(async () => {
+      try {
+        const response = await fetch(`/api/projects/${snapshot.project.id}/findings`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            category: findingCategoryDraft,
+            severity: findingSeverityDraft,
+            title: findingTitleDraft.trim(),
+            detail: findingDetailDraft.trim(),
+          }),
+        });
+        const payload = (await response.json().catch(() => ({}))) as {
+          error?: string;
+        };
+
+        if (!response.ok) {
+          throw new Error(payload.error ?? "Failed to create the finding.");
+        }
+
+        setFindingTitleDraft("");
+        setFindingDetailDraft("");
+        setFindingSaved("Finding saved.");
+        await refreshSnapshot();
+      } catch (error) {
+        setFindingError(error instanceof Error ? error.message : "Failed to create the finding.");
+      } finally {
+        setFindingBusy(false);
+      }
+    });
+  }
+
+  function updateFinding(findingId: string, status: FindingRecord["status"]) {
+    setFindingStatusBusyId(findingId);
+    setFindingStatusError(null);
+
+    startTransition(async () => {
+      try {
+        const response = await fetch(
+          `/api/projects/${snapshot.project.id}/findings/${findingId}`,
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              status,
+            }),
+          },
+        );
+        const payload = (await response.json().catch(() => ({}))) as {
+          error?: string;
+        };
+
+        if (!response.ok) {
+          throw new Error(payload.error ?? "Failed to update the finding.");
+        }
+
+        await refreshSnapshot();
+      } catch (error) {
+        setFindingStatusError(
+          error instanceof Error ? error.message : "Failed to update the finding.",
+        );
+      } finally {
+        setFindingStatusBusyId(null);
       }
     });
   }
@@ -908,7 +1051,14 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
   const checksStepState =
     snapshot.gateStatus.releaseStatus === "pass"
       ? ("done" as const)
-      : openFindings.length || snapshot.gateStatus.qaStatus === "fail" || snapshot.gateStatus.securityStatus === "fail"
+      : openFindings.length ||
+          snapshot.gateStatus.qaStatus === "fail" ||
+          snapshot.gateStatus.securityStatus === "fail" ||
+          snapshot.gateStatus.deployStatus === "fail" ||
+          snapshot.gateStatus.qaStatus === "partial" ||
+          snapshot.gateStatus.securityStatus === "partial" ||
+          snapshot.gateStatus.deployStatus === "partial" ||
+          snapshot.gateStatus.releaseStatus === "partial"
         ? ("warning" as const)
         : snapshot.symphony?.running || completedTasks > 0
           ? ("active" as const)
@@ -1373,27 +1523,77 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
               </div>
             </div>
           ) : null}
+          {snapshot.gateStatus.releaseStatus === "partial" ? (
+            <div className="panel rounded-[30px] border border-amber-300/20 bg-amber-400/8 p-6">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-amber-100">
+                    Release verification partial
+                  </p>
+                  <h2 className="mt-3 text-2xl font-semibold text-[var(--color-ink)]">
+                    Overture needs more evidence before this project is fully releasable
+                  </h2>
+                  <p className="mt-2 max-w-3xl text-sm leading-7 text-[var(--color-muted)]">
+                    {releaseGateReason ??
+                      "One or more gates still need stronger proof or include cloud targets that require live validation."}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("product")}
+                  className="glass-button inline-flex items-center gap-2 rounded-full px-5 py-3 text-sm font-semibold"
+                >
+                  <Boxes className="h-4 w-4" />
+                  Review handoff
+                </button>
+              </div>
+            </div>
+          ) : null}
 
           <div className="grid gap-4 lg:grid-cols-2">
             <GateCard
               label="QA checks"
               status={snapshot.gateStatus.qaStatus}
               description="Build, validation, test, and quality proof for the project."
+              note={
+                snapshot.gateStatus.qaStatus === "partial" ||
+                snapshot.gateStatus.qaStatus === "fail"
+                  ? qaGateReason
+                  : null
+              }
             />
             <GateCard
               label="Security checks"
               status={snapshot.gateStatus.securityStatus}
               description="Security scans, dependency review, and runtime safety checks."
+              note={
+                snapshot.gateStatus.securityStatus === "partial" ||
+                snapshot.gateStatus.securityStatus === "fail"
+                  ? securityGateReason
+                  : null
+              }
             />
             <GateCard
               label="Deployment checks"
               status={snapshot.gateStatus.deployStatus}
               description="Deployment proof for local launch and supported platform plans."
+              note={
+                snapshot.gateStatus.deployStatus === "partial" ||
+                snapshot.gateStatus.deployStatus === "fail"
+                  ? deployGateReason
+                  : null
+              }
             />
             <GateCard
               label="Ready to release"
               status={snapshot.gateStatus.releaseStatus}
               description="Final status after the required quality, security, and deployment checks."
+              note={
+                snapshot.gateStatus.releaseStatus === "partial" ||
+                snapshot.gateStatus.releaseStatus === "fail"
+                  ? releaseGateReason
+                  : null
+              }
             />
           </div>
 
@@ -1417,17 +1617,35 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
 
           <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
             <div className="panel rounded-[30px] p-6">
-              <div className="flex items-start gap-4">
-                <ShieldCheck className="mt-1 h-5 w-5 text-[var(--color-success)]" />
-                <div>
-                  <h2 className="text-2xl font-semibold text-[var(--color-ink)]">
-                    Findings summary
-                  </h2>
-                  <p className="mt-2 text-sm leading-7 text-[var(--color-muted)]">
-                    If anything is still blocking the project, it will show up here.
-                  </p>
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="flex items-start gap-4">
+                  <ShieldCheck className="mt-1 h-5 w-5 text-[var(--color-success)]" />
+                  <div>
+                    <h2 className="text-2xl font-semibold text-[var(--color-ink)]">
+                      Findings summary
+                    </h2>
+                    <p className="mt-2 text-sm leading-7 text-[var(--color-muted)]">
+                      If anything is still blocking the project, it will show up here.
+                    </p>
+                  </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={runSecurityReview}
+                  disabled={securityReviewBusy}
+                  className="inline-flex items-center gap-2 rounded-full border border-[var(--color-border)] bg-white/6 px-4 py-2 text-sm font-semibold text-[var(--color-ink)] transition hover:border-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <ShieldCheck className="h-4 w-4" />
+                  {securityReviewBusy ? "Running security review..." : "Run security review"}
+                </button>
               </div>
+
+              {securityReviewSaved ? (
+                <p className="mt-4 text-sm text-[var(--color-success)]">{securityReviewSaved}</p>
+              ) : null}
+              {securityReviewError ? (
+                <p className="mt-4 text-sm text-[var(--color-danger)]">{securityReviewError}</p>
+              ) : null}
 
               <div className="mt-5 space-y-3">
                 {openFindings.length ? (
@@ -1450,6 +1668,35 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
                       <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">
                         {finding.detail}
                       </p>
+                      <p className="mt-3 text-xs uppercase tracking-[0.18em] text-[var(--color-muted)]">
+                        Source: {finding.source}
+                      </p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => updateFinding(finding.id, "fix_in_progress")}
+                          disabled={findingStatusBusyId === finding.id}
+                          className="rounded-full border border-[var(--color-border)] bg-white/6 px-3 py-1 text-xs font-semibold text-[var(--color-ink)] transition hover:border-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Work in progress
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => updateFinding(finding.id, "resolved")}
+                          disabled={findingStatusBusyId === finding.id}
+                          className="rounded-full border border-emerald-300/25 bg-emerald-400/10 px-3 py-1 text-xs font-semibold text-[var(--color-ink)] transition hover:border-emerald-300/40 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Mark resolved
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => updateFinding(finding.id, "accepted_risk")}
+                          disabled={findingStatusBusyId === finding.id}
+                          className="rounded-full border border-amber-300/25 bg-amber-400/10 px-3 py-1 text-xs font-semibold text-[var(--color-ink)] transition hover:border-amber-300/40 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Accept risk
+                        </button>
+                      </div>
                     </div>
                   ))
                 ) : (
@@ -1457,6 +1704,96 @@ export function ProjectLiveShell({ initialSnapshot }: { initialSnapshot: Project
                     No open findings right now.
                   </div>
                 )}
+              </div>
+
+              {findingStatusError ? (
+                <p className="mt-4 text-sm text-[var(--color-danger)]">{findingStatusError}</p>
+              ) : null}
+
+              <div className="mt-6 rounded-[24px] border border-white/8 bg-[rgba(2,8,18,0.42)] p-4">
+                <h3 className="text-base font-semibold text-[var(--color-ink)]">Add manual finding</h3>
+                <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">
+                  Use this when a QA, security, or deployment issue needs to be tracked before release.
+                </p>
+                <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                  <label className="space-y-2">
+                    <span className="text-sm font-semibold text-[var(--color-ink)]">
+                      Finding category
+                    </span>
+                    <select
+                      aria-label="Finding category"
+                      value={findingCategoryDraft}
+                      onChange={(event) =>
+                        setFindingCategoryDraft(
+                          event.target.value as Extract<
+                            FindingRecord["category"],
+                            "qa" | "security" | "deploy"
+                          >,
+                        )
+                      }
+                      className="glass-input w-full rounded-[20px] px-4 py-3"
+                    >
+                      <option value="security">Security</option>
+                      <option value="qa">QA</option>
+                      <option value="deploy">Deploy</option>
+                    </select>
+                  </label>
+                  <label className="space-y-2">
+                    <span className="text-sm font-semibold text-[var(--color-ink)]">Severity</span>
+                    <select
+                      aria-label="Finding severity"
+                      value={findingSeverityDraft}
+                      onChange={(event) =>
+                        setFindingSeverityDraft(event.target.value as FindingRecord["severity"])
+                      }
+                      className="glass-input w-full rounded-[20px] px-4 py-3"
+                    >
+                      <option value="critical">Critical</option>
+                      <option value="high">High</option>
+                      <option value="medium">Medium</option>
+                      <option value="low">Low</option>
+                      <option value="info">Info</option>
+                    </select>
+                  </label>
+                  <label className="space-y-2 sm:col-span-2">
+                    <span className="text-sm font-semibold text-[var(--color-ink)]">
+                      Finding title
+                    </span>
+                    <input
+                      aria-label="Finding title"
+                      value={findingTitleDraft}
+                      onChange={(event) => setFindingTitleDraft(event.target.value)}
+                      className="glass-input w-full rounded-[20px] px-4 py-3"
+                    />
+                  </label>
+                  <label className="space-y-2 sm:col-span-2">
+                    <span className="text-sm font-semibold text-[var(--color-ink)]">
+                      Finding detail
+                    </span>
+                    <textarea
+                      aria-label="Finding detail"
+                      value={findingDetailDraft}
+                      onChange={(event) => setFindingDetailDraft(event.target.value)}
+                      className="glass-input min-h-[120px] w-full rounded-[24px] px-4 py-3 text-sm leading-7"
+                    />
+                  </label>
+                </div>
+                <div className="mt-4 flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={createManualFinding}
+                    disabled={findingBusy}
+                    className="glass-button inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {findingBusy ? "Saving finding..." : "Add finding"}
+                  </button>
+                  {findingSaved ? (
+                    <p className="text-sm text-[var(--color-success)]">{findingSaved}</p>
+                  ) : null}
+                  {findingError ? (
+                    <p className="text-sm text-[var(--color-danger)]">{findingError}</p>
+                  ) : null}
+                </div>
               </div>
             </div>
 

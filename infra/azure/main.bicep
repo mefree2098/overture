@@ -1,92 +1,170 @@
 @description('Location for Overture resources')
 param location string = resourceGroup().location
 
-@description('Container App environment name')
-param environmentName string = 'overture-env'
+@description('Virtual machine name')
+param vmName string = 'overture-control-plane'
 
-@description('Container app name')
-param appName string = 'overture-control-plane'
+@description('Admin username for the Linux VM')
+param adminUsername string = 'overture'
 
-@description('Container image reference')
-param image string = 'ghcr.io/example/overture:latest'
+@secure()
+@description('SSH public key used for emergency access and Azure VM provisioning requirements')
+param sshPublicKey string
 
-@description('Cosmos DB account name')
-param cosmosName string = 'overturecosmos'
+@description('VM size')
+param vmSize string = 'Standard_D4s_v5'
 
-resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2022-10-01' = {
-  name: '${appName}-logs'
+@description('CIDR allowed to reach the application on port 3000')
+param appAllowedCidr string = '0.0.0.0/0'
+
+@description('CIDR allowed to reach SSH on port 22. Leave empty to keep SSH closed.')
+param sshAllowedCidr string = ''
+
+var vnetName = '${vmName}-vnet'
+var subnetName = '${vmName}-subnet'
+var nsgName = '${vmName}-nsg'
+var publicIpName = '${vmName}-pip'
+var nicName = '${vmName}-nic'
+
+resource vnet 'Microsoft.Network/virtualNetworks@2024-05-01' = {
+  name: vnetName
   location: location
   properties: {
-    sku: {
-      name: 'PerGB2018'
+    addressSpace: {
+      addressPrefixes: [
+        '10.42.0.0/16'
+      ]
     }
-    retentionInDays: 30
-  }
-}
-
-resource managedEnvironment 'Microsoft.App/managedEnvironments@2024-03-01' = {
-  name: environmentName
-  location: location
-  properties: {
-    appLogsConfiguration: {
-      destination: 'log-analytics'
-      logAnalyticsConfiguration: {
-        customerId: logAnalytics.properties.customerId
-        sharedKey: logAnalytics.listKeys().primarySharedKey
-      }
-    }
-  }
-}
-
-resource cosmos 'Microsoft.DocumentDB/databaseAccounts@2024-08-15' = {
-  name: cosmosName
-  location: location
-  kind: 'GlobalDocumentDB'
-  properties: {
-    databaseAccountOfferType: 'Standard'
-    enableFreeTier: true
-    locations: [
+    subnets: [
       {
-        failoverPriority: 0
-        locationName: location
+        name: subnetName
+        properties: {
+          addressPrefix: '10.42.1.0/24'
+          networkSecurityGroup: {
+            id: nsg.id
+          }
+        }
       }
     ]
-    capabilities: []
   }
 }
 
-resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
-  name: appName
+resource nsg 'Microsoft.Network/networkSecurityGroups@2024-05-01' = {
+  name: nsgName
   location: location
   properties: {
-    managedEnvironmentId: managedEnvironment.id
-    configuration: {
-      ingress: {
-        external: true
-        targetPort: 3000
+    securityRules: [
+      {
+        name: 'allow-app'
+        properties: {
+          access: 'Allow'
+          direction: 'Inbound'
+          priority: 100
+          protocol: 'Tcp'
+          sourceAddressPrefix: appAllowedCidr
+          sourcePortRange: '*'
+          destinationAddressPrefix: '*'
+          destinationPortRange: '3000'
+        }
       }
+      if (!empty(sshAllowedCidr)) {
+        name: 'allow-ssh'
+        properties: {
+          access: 'Allow'
+          direction: 'Inbound'
+          priority: 110
+          protocol: 'Tcp'
+          sourceAddressPrefix: sshAllowedCidr
+          sourcePortRange: '*'
+          destinationAddressPrefix: '*'
+          destinationPortRange: '22'
+        }
+      }
+    ]
+  }
+}
+
+resource publicIp 'Microsoft.Network/publicIPAddresses@2024-05-01' = {
+  name: publicIpName
+  location: location
+  sku: {
+    name: 'Standard'
+  }
+  properties: {
+    publicIPAllocationMethod: 'Static'
+  }
+}
+
+resource nic 'Microsoft.Network/networkInterfaces@2024-05-01' = {
+  name: nicName
+  location: location
+  properties: {
+    ipConfigurations: [
+      {
+        name: 'primary'
+        properties: {
+          privateIPAllocationMethod: 'Dynamic'
+          publicIPAddress: {
+            id: publicIp.id
+          }
+          subnet: {
+            id: resourceId('Microsoft.Network/virtualNetworks/subnets', vnet.name, subnetName)
+          }
+        }
+      }
+    ]
+  }
+}
+
+resource vm 'Microsoft.Compute/virtualMachines@2024-07-01' = {
+  name: vmName
+  location: location
+  properties: {
+    hardwareProfile: {
+      vmSize: vmSize
     }
-    template: {
-      containers: [
-        {
-          name: 'overture'
-          image: image
-          env: [
+    osProfile: {
+      computerName: vmName
+      adminUsername: adminUsername
+      linuxConfiguration: {
+        disablePasswordAuthentication: true
+        ssh: {
+          publicKeys: [
             {
-              name: 'PORT'
-              value: '3000'
-            }
-            {
-              name: 'OVERTURE_BIND_HOST'
-              value: '0.0.0.0'
+              path: '/home/${adminUsername}/.ssh/authorized_keys'
+              keyData: sshPublicKey
             }
           ]
-          resources: {
-            cpu: 0.5
-            memory: '1Gi'
-          }
+        }
+      }
+      customData: base64(loadTextContent('cloud-init.yaml'))
+    }
+    storageProfile: {
+      imageReference: {
+        publisher: 'Canonical'
+        offer: '0001-com-ubuntu-server-jammy'
+        sku: '22_04-lts-gen2'
+        version: 'latest'
+      }
+      osDisk: {
+        createOption: 'FromImage'
+        managedDisk: {
+          storageAccountType: 'Premium_LRS'
+        }
+        diskSizeGB: 128
+      }
+    }
+    networkProfile: {
+      networkInterfaces: [
+        {
+          id: nic.id
         }
       ]
     }
   }
 }
+
+output vmId string = vm.id
+output vmName string = vm.name
+output publicIpAddress string = publicIp.properties.ipAddress
+output appUrl string = 'http://${publicIp.properties.ipAddress}:3000'

@@ -18,7 +18,13 @@ import {
   UploadCloud,
 } from "lucide-react";
 import { StatusPill } from "@/components/status-pill";
-import { lifecycleDisplayLabel, researchProviderLabel } from "@/lib/project-pipeline";
+import {
+  deployProfileMatchesDeploymentScope,
+  isPlanningOnlyDeploymentTarget,
+  launchProfileMatchesDeploymentScope,
+  lifecycleDisplayLabel,
+  researchProviderLabel,
+} from "@/lib/project-pipeline";
 import type {
   ArtifactRecord,
   DeploymentTarget,
@@ -184,6 +190,43 @@ export function ProjectPipelineShell({
         : view === "launch"
           ? "Open the built project locally and capture launch evidence."
           : "Push a validated project to a supported target with logs and approval gates.";
+  const planningOnlyDeploymentTargets = useMemo(
+    () => snapshot.project.deploymentTargets.filter(isPlanningOnlyDeploymentTarget),
+    [snapshot.project.deploymentTargets],
+  );
+  const scopedLaunchProfiles = useMemo(
+    () =>
+      snapshot.launchProfiles.filter((profile) =>
+        launchProfileMatchesDeploymentScope(profile.target, snapshot.project.deploymentTargets),
+      ),
+    [snapshot.launchProfiles, snapshot.project.deploymentTargets],
+  );
+  const supplementalLaunchProfiles = useMemo(
+    () =>
+      snapshot.launchProfiles.filter(
+        (profile) =>
+          !launchProfileMatchesDeploymentScope(profile.target, snapshot.project.deploymentTargets),
+      ),
+    [snapshot.launchProfiles, snapshot.project.deploymentTargets],
+  );
+  const scopedDeployProfiles = useMemo(
+    () =>
+      snapshot.deployProfiles.filter((profile) =>
+        deployProfileMatchesDeploymentScope(profile.target, snapshot.project.deploymentTargets),
+      ),
+    [snapshot.deployProfiles, snapshot.project.deploymentTargets],
+  );
+  const supplementalDeployProfiles = useMemo(
+    () =>
+      snapshot.deployProfiles.filter(
+        (profile) =>
+          !deployProfileMatchesDeploymentScope(profile.target, snapshot.project.deploymentTargets),
+      ),
+    [snapshot.deployProfiles, snapshot.project.deploymentTargets],
+  );
+  const planningOnlyDeployLabel = planningOnlyDeploymentTargets
+    .map((target) => deployTargetLabel(target))
+    .join(", ");
 
   const workshopDone = Boolean(promptArtifact);
   const researchDone = Boolean(planArtifact);
@@ -1056,55 +1099,124 @@ export function ProjectPipelineShell({
               Run the built project locally from Overture and capture a launch report and logs.
             </p>
             {launchError ? <p className="mt-3 text-sm text-[var(--color-danger)]">{launchError}</p> : null}
-            <div className="mt-5 grid gap-4 xl:grid-cols-2">
-              {snapshot.launchProfiles.length ? (
-                snapshot.launchProfiles.map((profile) => (
-                  <div
-                    key={profile.id}
-                    className="rounded-[24px] border border-white/8 bg-white/4 p-5"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--color-accent)]">
-                          {launchTargetLabel(profile.target)}
+            <div className="mt-5 space-y-5">
+              {scopedLaunchProfiles.length ? (
+                <div className="space-y-3">
+                  <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--color-muted)]">
+                    In-scope profiles
+                  </p>
+                  <div className="grid gap-4 xl:grid-cols-2">
+                    {scopedLaunchProfiles.map((profile) => (
+                      <div
+                        key={profile.id}
+                        className="rounded-[24px] border border-white/8 bg-white/4 p-5"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--color-accent)]">
+                              {launchTargetLabel(profile.target)}
+                            </p>
+                            <p className="mt-2 text-lg font-semibold text-[var(--color-ink)]">
+                              {profile.label}
+                            </p>
+                          </div>
+                          {profile.healthcheckUrl ? (
+                            <Link
+                              href={profile.healthcheckUrl}
+                              target="_blank"
+                              className="text-[var(--color-muted)] transition hover:text-[var(--color-accent)]"
+                            >
+                              <ExternalLink className="h-4 w-4" />
+                            </Link>
+                          ) : null}
+                        </div>
+                        <p className="mt-3 text-sm leading-7 text-[var(--color-muted)]">
+                          Command: <span className="font-mono">{profile.command}</span>
                         </p>
-                        <p className="mt-2 text-lg font-semibold text-[var(--color-ink)]">
-                          {profile.label}
-                        </p>
-                      </div>
-                      {profile.healthcheckUrl ? (
-                        <Link
-                          href={profile.healthcheckUrl}
-                          target="_blank"
-                          className="text-[var(--color-muted)] transition hover:text-[var(--color-accent)]"
+                        <button
+                          type="button"
+                          onClick={() => runLaunch(profile.id)}
+                          disabled={launchBusyId === profile.id}
+                          className="glass-button mt-4 inline-flex items-center gap-2 rounded-full px-5 py-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
                         >
-                          <ExternalLink className="h-4 w-4" />
-                        </Link>
-                      ) : null}
-                    </div>
-                    <p className="mt-3 text-sm leading-7 text-[var(--color-muted)]">
-                      Command: <span className="font-mono">{profile.command}</span>
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => runLaunch(profile.id)}
-                      disabled={launchBusyId === profile.id}
-                      className="glass-button mt-4 inline-flex items-center gap-2 rounded-full px-5 py-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {launchBusyId === profile.id ? (
-                        <LoaderCircle className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Rocket className="h-4 w-4" />
-                      )}
-                      Launch this profile
-                    </button>
+                          {launchBusyId === profile.id ? (
+                            <LoaderCircle className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Rocket className="h-4 w-4" />
+                          )}
+                          Launch this profile
+                        </button>
+                      </div>
+                    ))}
                   </div>
-                ))
-              ) : (
+                </div>
+              ) : null}
+
+              {supplementalLaunchProfiles.length ? (
+                <div className="space-y-3">
+                  <div className="rounded-[22px] border border-amber-300/20 bg-amber-400/8 p-4 text-sm leading-7 text-[var(--color-muted)]">
+                    These launch profiles were detected in the repo, but they sit outside the
+                    current deployment scope. You can still use them for extra validation when
+                    needed.
+                  </div>
+                  <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--color-muted)]">
+                    Additional detected profiles
+                  </p>
+                  <div className="grid gap-4 xl:grid-cols-2">
+                    {supplementalLaunchProfiles.map((profile) => (
+                      <div
+                        key={profile.id}
+                        className="rounded-[24px] border border-amber-300/15 bg-amber-400/5 p-5"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--color-accent)]">
+                              {launchTargetLabel(profile.target)}
+                            </p>
+                            <p className="mt-2 text-lg font-semibold text-[var(--color-ink)]">
+                              {profile.label}
+                            </p>
+                          </div>
+                          {profile.healthcheckUrl ? (
+                            <Link
+                              href={profile.healthcheckUrl}
+                              target="_blank"
+                              className="text-[var(--color-muted)] transition hover:text-[var(--color-accent)]"
+                            >
+                              <ExternalLink className="h-4 w-4" />
+                            </Link>
+                          ) : null}
+                        </div>
+                        <p className="mt-3 text-sm leading-7 text-[var(--color-muted)]">
+                          Command: <span className="font-mono">{profile.command}</span>
+                        </p>
+                        <p className="mt-2 text-xs text-amber-100/80">
+                          Outside the selected deployment scope.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => runLaunch(profile.id)}
+                          disabled={launchBusyId === profile.id}
+                          className="glass-button mt-4 inline-flex items-center gap-2 rounded-full px-5 py-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {launchBusyId === profile.id ? (
+                            <LoaderCircle className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Rocket className="h-4 w-4" />
+                          )}
+                          Launch anyway
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {!snapshot.launchProfiles.length ? (
                 <div className="rounded-[22px] border border-dashed border-white/10 bg-white/3 p-6 text-sm text-[var(--color-muted)]">
                   No launch profiles were detected for this project.
                 </div>
-              )}
+              ) : null}
             </div>
           </div>
 
@@ -1166,47 +1278,110 @@ export function ProjectPipelineShell({
               approval prompt and always write logs plus a deployment report.
             </p>
             {deployError ? <p className="mt-3 text-sm text-[var(--color-danger)]">{deployError}</p> : null}
-            <div className="mt-5 grid gap-4 xl:grid-cols-2">
-              {snapshot.deployProfiles.length ? (
-                snapshot.deployProfiles.map((profile) => (
-                  <div
-                    key={profile.id}
-                    className="rounded-[24px] border border-white/8 bg-white/4 p-5"
-                  >
-                    <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--color-accent)]">
-                      {deployTargetLabel(profile.target)}
-                    </p>
-                    <p className="mt-2 text-lg font-semibold text-[var(--color-ink)]">
-                      {profile.label}
-                    </p>
-                    <p className="mt-3 text-sm leading-7 text-[var(--color-muted)]">
-                      Command: <span className="font-mono">{profile.command}</span>
-                    </p>
-                    <p className="mt-2 text-xs text-[var(--color-muted)]">
-                      {profile.approvalRequired
-                        ? "Operator approval required before execution."
-                        : "No extra approval is required for this target."}
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => runDeploy(profile.id, profile.approvalRequired)}
-                      disabled={deployBusyId === profile.id}
-                      className="glass-button mt-4 inline-flex items-center gap-2 rounded-full px-5 py-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {deployBusyId === profile.id ? (
-                        <LoaderCircle className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <UploadCloud className="h-4 w-4" />
-                      )}
-                      Run deployment
-                    </button>
+            <div className="mt-5 space-y-5">
+              {planningOnlyDeploymentTargets.length ? (
+                <div className="rounded-[22px] border border-amber-300/20 bg-amber-400/8 p-4 text-sm leading-7 text-[var(--color-muted)]">
+                  {planningOnlyDeployLabel} depend on repo-level deploy.sh flows when you want a
+                  one-command cloud publish path. Overture can surface those commands when the repo
+                  includes them, but the final cloud verification still belongs to the operator.
+                </div>
+              ) : null}
+
+              {scopedDeployProfiles.length ? (
+                <div className="space-y-3">
+                  <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--color-muted)]">
+                    In-scope profiles
+                  </p>
+                  <div className="grid gap-4 xl:grid-cols-2">
+                    {scopedDeployProfiles.map((profile) => (
+                      <div
+                        key={profile.id}
+                        className="rounded-[24px] border border-white/8 bg-white/4 p-5"
+                      >
+                        <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--color-accent)]">
+                          {deployTargetLabel(profile.target)}
+                        </p>
+                        <p className="mt-2 text-lg font-semibold text-[var(--color-ink)]">
+                          {profile.label}
+                        </p>
+                        <p className="mt-3 text-sm leading-7 text-[var(--color-muted)]">
+                          Command: <span className="font-mono">{profile.command}</span>
+                        </p>
+                        <p className="mt-2 text-xs text-[var(--color-muted)]">
+                          {profile.approvalRequired
+                            ? "Operator approval required before execution."
+                            : "No extra approval is required for this target."}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => runDeploy(profile.id, profile.approvalRequired)}
+                          disabled={deployBusyId === profile.id}
+                          className="glass-button mt-4 inline-flex items-center gap-2 rounded-full px-5 py-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {deployBusyId === profile.id ? (
+                            <LoaderCircle className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <UploadCloud className="h-4 w-4" />
+                          )}
+                          Run deployment
+                        </button>
+                      </div>
+                    ))}
                   </div>
-                ))
-              ) : (
+                </div>
+              ) : null}
+
+              {supplementalDeployProfiles.length ? (
+                <div className="space-y-3">
+                  <div className="rounded-[22px] border border-amber-300/20 bg-amber-400/8 p-4 text-sm leading-7 text-[var(--color-muted)]">
+                    These deploy profiles were detected in the repo, but they are outside the
+                    current deployment scope.
+                  </div>
+                  <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--color-muted)]">
+                    Additional detected profiles
+                  </p>
+                  <div className="grid gap-4 xl:grid-cols-2">
+                    {supplementalDeployProfiles.map((profile) => (
+                      <div
+                        key={profile.id}
+                        className="rounded-[24px] border border-amber-300/15 bg-amber-400/5 p-5"
+                      >
+                        <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--color-accent)]">
+                          {deployTargetLabel(profile.target)}
+                        </p>
+                        <p className="mt-2 text-lg font-semibold text-[var(--color-ink)]">
+                          {profile.label}
+                        </p>
+                        <p className="mt-3 text-sm leading-7 text-[var(--color-muted)]">
+                          Command: <span className="font-mono">{profile.command}</span>
+                        </p>
+                        <p className="mt-2 text-xs text-amber-100/80">
+                          Outside the selected deployment scope.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => runDeploy(profile.id, profile.approvalRequired)}
+                          disabled={deployBusyId === profile.id}
+                          className="glass-button mt-4 inline-flex items-center gap-2 rounded-full px-5 py-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {deployBusyId === profile.id ? (
+                            <LoaderCircle className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <UploadCloud className="h-4 w-4" />
+                          )}
+                          Deploy anyway
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {!snapshot.deployProfiles.length ? (
                 <div className="rounded-[22px] border border-dashed border-white/10 bg-white/3 p-6 text-sm text-[var(--color-muted)]">
                   No deployment profiles were detected for this project.
                 </div>
-              )}
+              ) : null}
             </div>
           </div>
 

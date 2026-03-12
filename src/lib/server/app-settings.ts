@@ -40,6 +40,11 @@ function parseDeploymentTargets(value: unknown) {
   }
 }
 
+function envOverrideExecutionMode() {
+  const configured = process.env.OVERTURE_DEFAULT_EXECUTION_MODE?.trim();
+  return configured ? normalizeExecutionMode(configured) : null;
+}
+
 function hydrateSettings(row: Record<string, unknown>): AppSettingsRecord {
   return {
     plannerModel: sanitizeOptionalModel(row.planner_model as string | null | undefined),
@@ -54,7 +59,7 @@ function hydrateSettings(row: Record<string, unknown>): AppSettingsRecord {
       row.default_research_provider as string | null | undefined,
     ),
     defaultExecutionMode: normalizeExecutionMode(
-      row.default_execution_mode as string | null | undefined,
+      envOverrideExecutionMode() ?? (row.default_execution_mode as string | null | undefined),
     ),
     defaultRepoSource:
       String(row.default_repo_source ?? DEFAULT_APP_SETTINGS.defaultRepoSource).trim() || ".",

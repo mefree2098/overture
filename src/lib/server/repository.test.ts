@@ -544,4 +544,163 @@ describe("repository lifecycle", () => {
     expect(afterFinding?.gateStatus.deployStatus).toBe("fail");
     expect(afterFinding?.gateStatus.releaseStatus).toBe("fail");
   });
+
+  it("updates finding status and clears the gate when the finding is resolved", async () => {
+    const repository = await import("@/lib/server/repository");
+
+    const created = repository.createDraftProject({
+      name: "Finding Lifecycle",
+      repoSource: ".",
+      executionMode: "local_chatgpt",
+    });
+
+    const findingId = repository.createFinding({
+      projectId: created.projectId,
+      category: "security",
+      severity: "high",
+      status: "open",
+      title: "Hard-coded token",
+      detail: "A token was committed to the repo.",
+      source: "manual",
+    });
+
+    const blocked = repository.getProjectSnapshot(created.projectId);
+
+    repository.updateFindingStatus({
+      projectId: created.projectId,
+      findingId,
+      status: "resolved",
+    });
+
+    const cleared = repository.getProjectSnapshot(created.projectId);
+
+    expect(blocked?.gateStatus.securityStatus).toBe("fail");
+    expect(cleared?.findings.find((finding) => finding.id === findingId)?.status).toBe("resolved");
+    expect(cleared?.gateStatus.securityStatus).toBe("pending");
+  });
+
+  it("keeps QA partial until launch or deployment evidence is captured", async () => {
+    const repository = await import("@/lib/server/repository");
+    const { getDb } = await import("@/lib/server/db");
+
+    const created = await repository.createProjectFromSpec({
+      name: "QA Proof",
+      repoSource: ".",
+      executionMode: "local_chatgpt",
+      specFilename: "plan.md",
+      specText: "# Blueprint\n\n## Goal\nRequire QA proof before release",
+    });
+
+    getDb()
+      .prepare("UPDATE work_items SET status = 'done' WHERE project_id = ? AND type = 'qa'")
+      .run(created.projectId);
+
+    const partial = repository.getProjectSnapshot(created.projectId);
+
+    repository.writeArtifact({
+      projectId: created.projectId,
+      projectSlug: created.slug,
+      kind: "launch-report",
+      label: "Launch evidence",
+      extension: "md",
+      mimeType: "text/markdown",
+      content: "# Launch report",
+    });
+
+    const passed = repository.getProjectSnapshot(created.projectId);
+
+    expect(partial?.gateStatus.qaStatus).toBe("partial");
+    expect(partial?.gateStatus.summary.qaReason).toContain("Capture launch or deployment evidence");
+    expect(passed?.gateStatus.qaStatus).toBe("pass");
+  });
+
+  it("requires a complete security report before the security gate passes", async () => {
+    const repository = await import("@/lib/server/repository");
+    const { getDb } = await import("@/lib/server/db");
+
+    const created = await repository.createProjectFromSpec({
+      name: "Security Proof",
+      repoSource: ".",
+      executionMode: "local_chatgpt",
+      specFilename: "plan.md",
+      specText: "# Blueprint\n\n## Goal\nRequire complete security verification",
+    });
+
+    getDb()
+      .prepare("UPDATE work_items SET status = 'done' WHERE project_id = ? AND type = 'security'")
+      .run(created.projectId);
+
+    const withoutReport = repository.getProjectSnapshot(created.projectId);
+
+    repository.writeArtifact({
+      projectId: created.projectId,
+      projectSlug: created.slug,
+      kind: "security-report",
+      label: "Partial security report",
+      extension: "md",
+      mimeType: "text/markdown",
+      content: "# Security report",
+      metadata: {
+        coverageComplete: false,
+        coverageWarnings: ["Semgrep ended as skipped. Tooling is unavailable."],
+      },
+    });
+
+    const partial = repository.getProjectSnapshot(created.projectId);
+
+    repository.writeArtifact({
+      projectId: created.projectId,
+      projectSlug: created.slug,
+      kind: "security-report",
+      label: "Complete security report",
+      extension: "md",
+      mimeType: "text/markdown",
+      content: "# Security report",
+      metadata: {
+        coverageComplete: true,
+        coverageWarnings: [],
+      },
+    });
+
+    const passed = repository.getProjectSnapshot(created.projectId);
+
+    expect(withoutReport?.gateStatus.securityStatus).toBe("partial");
+    expect(partial?.gateStatus.securityStatus).toBe("partial");
+    expect(partial?.gateStatus.summary.securityReason).toContain("Semgrep ended as skipped");
+    expect(passed?.gateStatus.securityStatus).toBe("pass");
+  });
+
+  it("marks deployment verification partial when cloud baselines stay in scope", async () => {
+    const repository = await import("@/lib/server/repository");
+    const { getDb } = await import("@/lib/server/db");
+
+    const created = await repository.createProjectFromSpec({
+      name: "Cloud Baseline",
+      repoSource: ".",
+      executionMode: "local_chatgpt",
+      specFilename: "plan.md",
+      specText: "# Blueprint\n\n## Goal\nTrack cloud deployment scope honestly",
+    });
+
+    repository.updateProjectSettings(created.projectId, {
+      deploymentTargets: ["local", "aws"],
+    });
+    getDb()
+      .prepare("UPDATE work_items SET status = 'done' WHERE project_id = ? AND type = 'deploy'")
+      .run(created.projectId);
+    repository.writeArtifact({
+      projectId: created.projectId,
+      projectSlug: created.slug,
+      kind: "deployment-report",
+      label: "Local deployment report",
+      extension: "md",
+      mimeType: "text/markdown",
+      content: "# Deployment report",
+    });
+
+    const snapshot = repository.getProjectSnapshot(created.projectId);
+
+    expect(snapshot?.gateStatus.deployStatus).toBe("partial");
+    expect(snapshot?.gateStatus.summary.deployReason).toContain("AWS");
+  });
 });

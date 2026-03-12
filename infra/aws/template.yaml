@@ -1,50 +1,146 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Overture control plane AWS planning baseline (not a live Symphony hosting stack)
+Description: Overture single-instance EC2 deployment host
+
+Parameters:
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+  InstanceType:
+    Type: String
+    Default: t3.xlarge
+  AppAllowedCidr:
+    Type: String
+    Default: 0.0.0.0/0
 
 Resources:
-  OvertureKmsKey:
-    Type: AWS::KMS::Key
+  OvertureVpc:
+    Type: AWS::EC2::VPC
     Properties:
-      Description: Customer managed key for Overture state encryption
-      EnableKeyRotation: true
+      CidrBlock: 10.42.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: overture-vpc
 
-  OvertureFunction:
-    Type: AWS::Lambda::Function
-    Properties:
-      FunctionName: overture-control-plane
-      Runtime: nodejs22.x
-      Handler: index.handler
-      Role: arn:aws:iam::123456789012:role/overture-lambda-role
-      Code:
-        ZipFile: |
-          exports.handler = async () => ({
-            statusCode: 200,
-            body: JSON.stringify({ ok: true }),
-          });
-      Timeout: 30
-      MemorySize: 512
-      TracingConfig:
-        Mode: Active
+  OvertureInternetGateway:
+    Type: AWS::EC2::InternetGateway
 
-  OvertureTable:
-    Type: AWS::DynamoDB::Table
+  OvertureGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
     Properties:
-      BillingMode: PAY_PER_REQUEST
-      AttributeDefinitions:
-        - AttributeName: id
-          AttributeType: S
-      KeySchema:
-        - AttributeName: id
-          KeyType: HASH
-      PointInTimeRecoverySpecification:
-        PointInTimeRecoveryEnabled: true
-      SSESpecification:
-        SSEEnabled: true
-        SSEType: KMS
-        KMSMasterKeyId: !GetAtt OvertureKmsKey.Arn
+      InternetGatewayId: !Ref OvertureInternetGateway
+      VpcId: !Ref OvertureVpc
+
+  OverturePublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref OvertureVpc
+      CidrBlock: 10.42.1.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: overture-public-subnet
+
+  OvertureRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref OvertureVpc
+
+  OvertureDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: OvertureGatewayAttachment
+    Properties:
+      RouteTableId: !Ref OvertureRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref OvertureInternetGateway
+
+  OvertureSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref OvertureRouteTable
+      SubnetId: !Ref OverturePublicSubnet
+
+  OvertureSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Overture control plane ingress
+      VpcId: !Ref OvertureVpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          CidrIp: !Ref AppAllowedCidr
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+  OvertureInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  OvertureInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref OvertureInstanceRole
+
+  OvertureInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref OvertureInstanceProfile
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: true
+          DeviceIndex: "0"
+          GroupSet:
+            - !Ref OvertureSecurityGroup
+          SubnetId: !Ref OverturePublicSubnet
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeType: gp3
+            VolumeSize: 128
+            DeleteOnTermination: true
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          set -euxo pipefail
+          dnf update -y
+          dnf install -y docker curl
+          systemctl enable --now docker
+          mkdir -p /opt/overture/runtime
+      Tags:
+        - Key: Name
+          Value: overture-control-plane
+
+  OvertureElasticIp:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  OvertureElasticIpAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt OvertureElasticIp.AllocationId
+      InstanceId: !Ref OvertureInstance
 
 Outputs:
-  FunctionName:
-    Value: !Ref OvertureFunction
-  TableName:
-    Value: !Ref OvertureTable
+  InstanceId:
+    Value: !Ref OvertureInstance
+  PublicIp:
+    Value: !Ref OvertureElasticIp
+  AppUrl:
+    Value: !Sub http://${OvertureElasticIp}:3000

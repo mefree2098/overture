@@ -1,5 +1,9 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import {
+  deployProfileMatchesDeploymentScope,
+  launchProfileMatchesDeploymentScope,
+} from "@/lib/project-pipeline";
 import { normalizeRepoSource } from "@/lib/server/runtime-config";
 import { getProjectPaths } from "@/lib/server/storage";
 import type {
@@ -253,6 +257,8 @@ export function buildProjectProductGuide(input: {
         ? sourceRoot
         : projectWorkspaceRoot;
   const readmePath = preferredReadmePath(inspectionRoot);
+  const azureRunbookPath = path.join(inspectionRoot, "infra", "azure", "README.md");
+  const awsRunbookPath = path.join(inspectionRoot, "infra", "aws", "README.md");
   const accessCommands: ProjectProductCommandRecord[] = [
     toAccessCommand({
       id: "access:workspace",
@@ -275,7 +281,14 @@ export function buildProjectProductGuide(input: {
     );
   }
 
-  const runCommands = input.launchProfiles.map((profile) => ({
+  const scopedLaunchProfiles = input.launchProfiles.filter((profile) =>
+    launchProfileMatchesDeploymentScope(profile.target, input.project.deploymentTargets),
+  );
+  const scopedDeployProfiles = input.deployProfiles.filter((profile) =>
+    deployProfileMatchesDeploymentScope(profile.target, input.project.deploymentTargets),
+  );
+
+  const runCommands = scopedLaunchProfiles.map((profile) => ({
     id: `run:${profile.id}`,
     label: profile.label,
     command: profile.command,
@@ -292,7 +305,7 @@ export function buildProjectProductGuide(input: {
         : `Launch target ${profile.target}.`,
     category: "run" as const,
   }));
-  const publishCommands = input.deployProfiles.map((profile) => ({
+  const publishCommands = scopedDeployProfiles.map((profile) => ({
     id: `publish:${profile.id}`,
     label: profile.label,
     command: profile.command,
@@ -386,6 +399,24 @@ export function buildProjectProductGuide(input: {
           href: null,
         }
       : null,
+    input.project.deploymentTargets.includes("azure") && existsSync(azureRunbookPath)
+      ? {
+          id: "doc:azure-runbook",
+          label: "Azure deploy runbook",
+          detail: "Instructions and required inputs for the generated Azure deploy.sh flow.",
+          path: azureRunbookPath,
+          href: null,
+        }
+      : null,
+    input.project.deploymentTargets.includes("aws") && existsSync(awsRunbookPath)
+      ? {
+          id: "doc:aws-runbook",
+          label: "AWS deploy runbook",
+          detail: "Instructions and required inputs for the generated AWS deploy.sh flow.",
+          path: awsRunbookPath,
+          href: null,
+        }
+      : null,
     artifactDocument(
       latestArtifact(input.artifacts, "launch-report"),
       "Latest launch report",
@@ -412,6 +443,9 @@ export function buildProjectProductGuide(input: {
     workspaceReady
       ? "Overture executes against a copied workspace, so the final code usually lives in the Symphony working copy rather than the original source path."
       : "The working copy has not been populated yet. Start or rerun automation if you want Overture to materialize a final-code workspace.",
+    input.project.deploymentTargets.some((target) => target === "aws" || target === "azure")
+      ? "AWS and Azure rely on repo-level deploy.sh flows for one-command publishing. Overture can surface those commands when the repo includes them, but final cloud validation still stays operator-owned."
+      : null,
   ].filter(Boolean);
 
   return {

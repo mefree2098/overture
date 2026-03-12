@@ -42,6 +42,7 @@ async function waitForHealthcheck(url: string, timeoutMs = 90000) {
 function deploymentHealthUrl(input: {
   target: string;
   metadata?: Record<string, unknown>;
+  commandOutput?: string;
 }) {
   const configured =
     typeof input.metadata?.healthcheckUrl === "string"
@@ -50,6 +51,36 @@ function deploymentHealthUrl(input: {
 
   if (configured) {
     return configured;
+  }
+
+  if (input.commandOutput) {
+    const lines = input.commandOutput.split(/\r?\n/);
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+
+      if (!trimmed) {
+        continue;
+      }
+
+      if (trimmed.startsWith("OVERTURE_HEALTHCHECK_URL=") || trimmed.startsWith("HEALTHCHECK_URL=")) {
+        const [, rawUrl] = trimmed.split("=", 2);
+        const url = rawUrl?.trim();
+
+        if (url) {
+          return url;
+        }
+      }
+
+      if (trimmed.startsWith("OVERTURE_APP_URL=") || trimmed.startsWith("APP_URL=")) {
+        const [, rawUrl] = trimmed.split("=", 2);
+        const url = rawUrl?.trim();
+
+        if (url) {
+          return `${url.replace(/\/$/, "")}/api/health`;
+        }
+      }
+    }
   }
 
   switch (input.target) {
@@ -169,9 +200,11 @@ export async function runProjectDeployment(input: {
       throw new Error(`Deployment command failed with exit code ${result.status}.`);
     }
 
+    const commandOutput = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
     const healthUrl = deploymentHealthUrl({
       target: profile.target,
       metadata: profile.metadata,
+      commandOutput,
     });
     if (healthUrl) {
       await waitForHealthcheck(healthUrl, 120000);
@@ -223,6 +256,7 @@ export async function runProjectDeployment(input: {
       metadata: {
         deployProfileId: profile.id,
         target: profile.target,
+        ...(healthUrl ? { healthcheckUrl: healthUrl } : {}),
       },
     });
 

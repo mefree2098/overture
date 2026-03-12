@@ -42,6 +42,7 @@ describe("project product guide", () => {
 
     mkdirSync(projectRoot, { recursive: true });
     mkdirSync(projectWorkspaceRoot, { recursive: true });
+    mkdirSync(path.join(projectWorkspaceRoot, "infra", "azure"), { recursive: true });
     writeFileSync(
       path.join(projectWorkspaceRoot, "package.json"),
       JSON.stringify({
@@ -54,6 +55,11 @@ describe("project product guide", () => {
       "utf8",
     );
     writeFileSync(path.join(projectWorkspaceRoot, "README.md"), "# Product\n", "utf8");
+    writeFileSync(
+      path.join(projectWorkspaceRoot, "infra", "azure", "README.md"),
+      "# Azure\n",
+      "utf8",
+    );
 
     const guide = buildProjectProductGuide({
       project: {
@@ -74,7 +80,7 @@ describe("project product guide", () => {
         health: "on_track",
         qaStrictness: 4,
         securityStrictness: 4,
-        deploymentTargets: ["local"],
+        deploymentTargets: ["local", "azure"],
         cumulativeTokenUsage: {
           inputTokens: 0,
           outputTokens: 0,
@@ -118,14 +124,24 @@ describe("project product guide", () => {
     expect(guide.primaryPath).toBe(projectWorkspaceRoot);
     expect(guide.runCommands[0]?.cwd).toBe(projectWorkspaceRoot);
     expect(guide.publishCommands[0]?.cwd).toBe(projectWorkspaceRoot);
+    expect(guide.publishCommands).toHaveLength(1);
     expect(guide.testCommands.map((command) => command.command)).toEqual(
       expect.arrayContaining(["npm test", "npm run lint", "npm run build"]),
+    );
+    expect(guide.notes).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("operator-owned"),
+      ]),
     );
     expect(guide.documents).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           label: "README",
           path: path.join(projectWorkspaceRoot, "README.md"),
+        }),
+        expect.objectContaining({
+          label: "Azure deploy runbook",
+          path: path.join(projectWorkspaceRoot, "infra", "azure", "README.md"),
         }),
       ]),
     );

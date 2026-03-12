@@ -3,6 +3,7 @@
 import { DEPLOYMENT_TARGETS } from "@/lib/constants";
 import {
   deploymentTargetLabel,
+  deploymentTargetScopeNote,
   toggleDeploymentTargetSelection,
 } from "@/lib/project-pipeline";
 import type { DeploymentTarget } from "@/lib/types";
@@ -19,6 +20,7 @@ export function DeploymentTargetsField({
       <div className="grid gap-3 sm:grid-cols-2">
         {DEPLOYMENT_TARGETS.map((target) => {
           const selected = selectedTargets.includes(target);
+          const scopeNote = deploymentTargetScopeNote(target);
 
           return (
             <label
@@ -43,6 +45,9 @@ export function DeploymentTargetsField({
               <p className="mt-2 text-xs leading-6 text-[var(--color-muted)]">
                 {selected ? "Included in project scope." : "Not included in project scope."}
               </p>
+              {scopeNote ? (
+                <p className="mt-2 text-xs leading-6 text-amber-100/80">{scopeNote}</p>
+              ) : null}
             </label>
           );
         })}

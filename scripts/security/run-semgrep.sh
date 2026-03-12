@@ -2,7 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-OUTPUT_DIR="$ROOT_DIR/.overture/security"
+SCAN_ROOT="${SCAN_ROOT:-$ROOT_DIR}"
+OUTPUT_DIR="${OUTPUT_DIR:-$ROOT_DIR/.overture/security}"
 mkdir -p "$OUTPUT_DIR"
 
 if command -v semgrep >/dev/null 2>&1; then
@@ -14,13 +15,16 @@ if command -v semgrep >/dev/null 2>&1; then
     --exclude .next \
     --exclude .overture \
     --exclude vendor \
-    "$ROOT_DIR"
-else
+    "$SCAN_ROOT"
+elif command -v docker >/dev/null 2>&1; then
   docker run --rm \
-    -v "$ROOT_DIR:/src" \
+    -v "$SCAN_ROOT:/src" \
     -v "$OUTPUT_DIR:/out" \
     semgrep/semgrep:latest \
     semgrep scan --config auto --json --output /out/semgrep.json --exclude vendor /src
+else
+  echo "Semgrep is unavailable and docker is not installed." >&2
+  exit 2
 fi
 
 echo "Semgrep report written to $OUTPUT_DIR/semgrep.json"

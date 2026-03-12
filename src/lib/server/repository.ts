@@ -4,6 +4,8 @@ import path from "node:path";
 import { DEFAULT_POLICY_PROFILE } from "@/lib/constants";
 import { normalizeCodexReasoningEffort } from "@/lib/codex-reasoning";
 import {
+  deploymentTargetLabel,
+  isPlanningOnlyDeploymentTarget,
   normalizeDeploymentTargets,
   normalizeLifecycleStage,
   normalizeResearchProvider,
@@ -127,52 +129,120 @@ function shouldAutoAdvanceWorkItem(workItem: WorkItemRecord) {
   return workItemLane(workItem) === "epic";
 }
 
+const QA_EVIDENCE_KINDS = new Set([
+  "launch-report",
+  "launch-log",
+  "launch-screenshot",
+  "launch-diagnostics",
+  "deployment-report",
+  "deployment-log",
+]);
+
+const DEPLOY_EVIDENCE_KINDS = new Set([
+  "deploy-plan",
+  "deployment-report",
+  "deployment-log",
+]);
+
+function latestArtifactByKind(artifacts: ArtifactRecord[], kind: string) {
+  return artifacts.find((artifact) => artifact.kind === kind) ?? null;
+}
+
+function artifactKindsInSet(artifacts: ArtifactRecord[], kinds: Set<string>) {
+  return [
+    ...new Set(
+      artifacts
+        .filter((artifact) => kinds.has(artifact.kind))
+        .map((artifact) => artifact.kind),
+    ),
+  ];
+}
+
 function resolveGateSnapshot(
+  project: ProjectRecord,
   workItems: WorkItemRecord[],
   findings: FindingRecord[],
   artifacts: ArtifactRecord[],
 ) {
+  const unresolvedFindingStatuses = ["resolved", "accepted_risk"];
   const hasOpenSecurityFinding = findings.some(
     (finding) =>
       finding.category === "security" &&
       ["critical", "high"].includes(finding.severity) &&
-      !["resolved", "accepted_risk"].includes(finding.status),
+      !unresolvedFindingStatuses.includes(finding.status),
+  );
+  const hasAnyOpenSecurityFinding = findings.some(
+    (finding) =>
+      finding.category === "security" &&
+      !unresolvedFindingStatuses.includes(finding.status),
   );
   const hasOpenQaFinding = findings.some(
     (finding) =>
       finding.category === "qa" &&
-      !["resolved", "accepted_risk"].includes(finding.status),
+      !unresolvedFindingStatuses.includes(finding.status),
   );
   const hasOpenDeployFinding = findings.some(
     (finding) =>
       finding.category === "deploy" &&
-      !["resolved", "accepted_risk"].includes(finding.status),
+      !unresolvedFindingStatuses.includes(finding.status),
   );
-  const qaTasksComplete = workItems
-    .filter((workItem) => workItem.type === "qa")
-    .every((workItem) => isTerminalWorkItemStatus(workItem.status));
-  const securityTasksComplete = workItems
-    .filter((workItem) => workItem.type === "security")
-    .every((workItem) => isTerminalWorkItemStatus(workItem.status));
-  const deployTasksComplete = workItems
-    .filter((workItem) => workItem.type === "deploy")
-    .every((workItem) => isTerminalWorkItemStatus(workItem.status));
+  const qaTasks = workItems.filter((workItem) => workItem.type === "qa");
+  const securityTasks = workItems.filter((workItem) => workItem.type === "security");
+  const deployTasks = workItems.filter((workItem) => workItem.type === "deploy");
+  const qaTasksComplete =
+    qaTasks.length > 0 && qaTasks.every((workItem) => isTerminalWorkItemStatus(workItem.status));
+  const securityTasksComplete =
+    securityTasks.length > 0 &&
+    securityTasks.every((workItem) => isTerminalWorkItemStatus(workItem.status));
+  const deployTasksComplete =
+    deployTasks.length > 0 &&
+    deployTasks.every((workItem) => isTerminalWorkItemStatus(workItem.status));
   const allTasksComplete = workItems.every((workItem) => isTerminalWorkItemStatus(workItem.status));
+  const qaEvidenceKinds = artifactKindsInSet(artifacts, QA_EVIDENCE_KINDS);
+  const hasQaEvidence = qaEvidenceKinds.length > 0;
+  const latestSecurityReport = latestArtifactByKind(artifacts, "security-report");
+  const hasSecurityEvidence = Boolean(latestSecurityReport);
+  const securityCoverageComplete = latestSecurityReport?.metadata.coverageComplete === true;
+  const securityCoverageWarnings = Array.isArray(latestSecurityReport?.metadata.coverageWarnings)
+    ? latestSecurityReport.metadata.coverageWarnings
+        .filter((warning): warning is string => typeof warning === "string" && warning.trim().length > 0)
+    : [];
+  const deployEvidenceKinds = artifactKindsInSet(artifacts, DEPLOY_EVIDENCE_KINDS);
+  const hasDeployEvidence = deployEvidenceKinds.length > 0;
+  const unverifiedDeployTargets = project.deploymentTargets.filter(isPlanningOnlyDeploymentTarget);
+  const unverifiedDeployLabel = unverifiedDeployTargets.map(deploymentTargetLabel).join(", ");
+  const qaVerificationTracked = qaTasks.length > 0 || hasOpenQaFinding || hasQaEvidence;
+  const securityVerificationTracked =
+    securityTasks.length > 0 || hasAnyOpenSecurityFinding || hasSecurityEvidence;
+  const deployVerificationTracked =
+    deployTasks.length > 0 ||
+    hasOpenDeployFinding ||
+    hasDeployEvidence ||
+    unverifiedDeployTargets.length > 0;
 
-  const qaStatus = hasOpenQaFinding ? "fail" : qaTasksComplete ? "pass" : "pending";
+  const qaStatus = hasOpenQaFinding
+    ? "fail"
+    : !qaVerificationTracked || !qaTasksComplete
+      ? "pending"
+      : hasQaEvidence
+        ? "pass"
+        : "partial";
   const securityStatus = hasOpenSecurityFinding
     ? "fail"
-    : securityTasksComplete
-      ? "pass"
-      : "pending";
+    : !securityVerificationTracked || !securityTasksComplete
+      ? "pending"
+      : !hasSecurityEvidence
+        ? "partial"
+        : securityCoverageComplete
+          ? "pass"
+          : "partial";
   const deployStatus = hasOpenDeployFinding
     ? "fail"
-    : deployTasksComplete ||
-        artifacts.some((artifact) =>
-          ["deploy-plan", "deployment-report", "deployment-log"].includes(artifact.kind),
-        )
-      ? "pass"
-      : "pending";
+    : !deployVerificationTracked || (!deployTasksComplete && !hasDeployEvidence)
+      ? "pending"
+      : unverifiedDeployTargets.length > 0
+        ? "partial"
+        : "pass";
   const releaseStatus =
     qaStatus === "pass" &&
     securityStatus === "pass" &&
@@ -181,7 +251,47 @@ function resolveGateSnapshot(
       ? "pass"
       : hasOpenSecurityFinding || hasOpenQaFinding || hasOpenDeployFinding
         ? "fail"
-        : "pending";
+        : qaStatus === "partial" || securityStatus === "partial" || deployStatus === "partial"
+          ? "partial"
+          : "pending";
+
+  const qaReason =
+    qaStatus === "partial"
+      ? "Capture launch or deployment evidence before the QA gate can pass."
+      : qaStatus === "fail"
+        ? "Resolve the open QA findings before release."
+        : qaStatus === "pending"
+          ? "QA work items are still open."
+          : null;
+  const securityReason =
+    securityStatus === "partial"
+      ? hasSecurityEvidence
+        ? securityCoverageWarnings[0] ??
+          "Security proof exists, but scanner coverage is still incomplete."
+        : "Run a project security review to capture a security report."
+      : securityStatus === "fail"
+        ? "Resolve the open high-severity security findings before release."
+        : securityStatus === "pending"
+          ? "Security work items are still open."
+          : null;
+  const deployReason =
+    deployStatus === "partial"
+      ? `Selected cloud targets (${unverifiedDeployLabel}) rely on repo-level deploy.sh flows for one-command publishing, and Overture still expects operator-side live verification before release.`
+      : deployStatus === "fail"
+        ? "Resolve the open deployment findings before release."
+        : deployStatus === "pending"
+          ? "Deployment work is still open or no deployment evidence has been captured yet."
+          : null;
+  const releaseReason =
+    releaseStatus === "partial"
+      ? qaReason ?? securityReason ?? deployReason ?? "One or more release checks are only partially verified."
+      : releaseStatus === "fail"
+        ? "Resolve the failing release gates before handoff."
+        : releaseStatus === "pending"
+          ? allTasksComplete
+            ? "Release verification is still waiting on required evidence."
+            : "Some planned work items are still open."
+          : null;
 
   return {
     qaStatus,
@@ -191,6 +301,20 @@ function resolveGateSnapshot(
     hasOpenQaFinding,
     hasOpenSecurityFinding,
     hasOpenDeployFinding,
+    gateSummary: {
+      qaEvidenceKinds,
+      hasQaEvidence,
+      hasSecurityEvidence,
+      securityCoverageComplete,
+      securityCoverageWarnings,
+      deployEvidenceKinds,
+      hasDeployEvidence,
+      unverifiedDeployTargets,
+      qaReason,
+      securityReason,
+      deployReason,
+      releaseReason,
+    },
   } satisfies Pick<
     GateStatusRecord,
     "qaStatus" | "securityStatus" | "deployStatus" | "releaseStatus"
@@ -198,6 +322,7 @@ function resolveGateSnapshot(
     hasOpenQaFinding: boolean;
     hasOpenSecurityFinding: boolean;
     hasOpenDeployFinding: boolean;
+    gateSummary: Record<string, unknown>;
   };
 }
 
@@ -608,7 +733,11 @@ function computeProjectHealth(
 
   if (
     gateStatus.qaStatus === "fail" ||
-    gateStatus.deployStatus === "fail"
+    gateStatus.deployStatus === "fail" ||
+    gateStatus.qaStatus === "partial" ||
+    gateStatus.securityStatus === "partial" ||
+    gateStatus.deployStatus === "partial" ||
+    gateStatus.releaseStatus === "partial"
   ) {
     return "at_risk" as const;
   }
@@ -740,7 +869,211 @@ export function createFinding(input: {
     timestamp,
   );
 
+  appendAuditEvent({
+    projectId: input.projectId,
+    workItemId: input.workItemId ?? null,
+    actor: "finding",
+    action: "finding.created",
+    detail: `${input.category} finding opened: ${input.title}`,
+    payload: {
+      findingId: id,
+      runId: input.runId ?? null,
+      category: input.category,
+      severity: input.severity,
+      status: input.status,
+      title: input.title,
+      source: input.source,
+    },
+  });
+  recomputeGateStatuses(input.projectId);
+
   return id;
+}
+
+export function updateFindingStatus(input: {
+  projectId: string;
+  findingId: string;
+  status: FindingRecord["status"];
+  note?: string | null;
+}) {
+  const db = getDb();
+  const row = db
+    .prepare("SELECT * FROM findings WHERE id = ? AND project_id = ?")
+    .get(input.findingId, input.projectId) as Record<string, unknown> | undefined;
+
+  if (!row) {
+    return null;
+  }
+
+  const existing = hydrateFinding(row);
+  const timestamp = nowIso();
+  const metadata = {
+    ...existing.metadata,
+    lastStatusNote: input.note?.trim() ? input.note.trim() : existing.metadata.lastStatusNote ?? null,
+  };
+
+  db.prepare(
+    `
+      UPDATE findings
+      SET status = ?, metadata_json = ?, updated_at = ?
+      WHERE id = ? AND project_id = ?
+    `,
+  ).run(input.status, serialise(metadata), timestamp, input.findingId, input.projectId);
+
+  appendAuditEvent({
+    projectId: input.projectId,
+    actor: "finding",
+    action: "finding.status_updated",
+    detail: `${existing.title} is now ${input.status}.`,
+    payload: {
+      findingId: input.findingId,
+      previousStatus: existing.status,
+      nextStatus: input.status,
+      note: input.note?.trim() || null,
+    },
+  });
+  recomputeGateStatuses(input.projectId);
+
+  return hydrateFinding(
+    db.prepare("SELECT * FROM findings WHERE id = ?").get(input.findingId) as Record<string, unknown>,
+  );
+}
+
+export function reconcileFindingSource(input: {
+  projectId: string;
+  category: FindingRecord["category"];
+  source: string;
+  title: string;
+  detail: string;
+  severity: FindingRecord["severity"];
+  metadata?: Record<string, unknown>;
+}) {
+  const db = getDb();
+  const matches = db
+    .prepare(
+      "SELECT * FROM findings WHERE project_id = ? AND source = ? ORDER BY created_at DESC, rowid DESC",
+    )
+    .all(input.projectId, input.source)
+    .map((row) => hydrateFinding(row as Record<string, unknown>));
+  const primary = matches[0] ?? null;
+  const extras = matches.slice(1);
+  const timestamp = nowIso();
+
+  if (extras.length) {
+    const resolveDuplicate = db.prepare(
+      "UPDATE findings SET status = 'resolved', updated_at = ? WHERE id = ?",
+    );
+
+    for (const finding of extras) {
+      if (finding.status === "accepted_risk") {
+        continue;
+      }
+
+      resolveDuplicate.run(timestamp, finding.id);
+    }
+  }
+
+  if (!primary) {
+    return createFinding({
+      projectId: input.projectId,
+      category: input.category,
+      severity: input.severity,
+      status: "open",
+      title: input.title,
+      detail: input.detail,
+      source: input.source,
+      metadata: input.metadata,
+    });
+  }
+
+  const nextStatus =
+    primary.status === "accepted_risk"
+      ? "accepted_risk"
+      : primary.status === "fix_in_progress"
+        ? "fix_in_progress"
+        : "open";
+
+  db.prepare(
+    `
+      UPDATE findings
+      SET category = ?, severity = ?, status = ?, title = ?, detail = ?, metadata_json = ?, updated_at = ?
+      WHERE id = ?
+    `,
+  ).run(
+    input.category,
+    input.severity,
+    nextStatus,
+    input.title,
+    input.detail,
+    serialise({
+      ...primary.metadata,
+      ...(input.metadata ?? {}),
+    }),
+    timestamp,
+    primary.id,
+  );
+
+  appendAuditEvent({
+    projectId: input.projectId,
+    actor: "finding",
+    action: "finding.reconciled",
+    detail: `${input.title} is still present in ${input.source}.`,
+    payload: {
+      findingId: primary.id,
+      source: input.source,
+      severity: input.severity,
+      status: nextStatus,
+    },
+  });
+  recomputeGateStatuses(input.projectId);
+
+  return primary.id;
+}
+
+export function resolveFindingSource(input: {
+  projectId: string;
+  source: string;
+  note?: string | null;
+}) {
+  const db = getDb();
+  const timestamp = nowIso();
+  const findings = db
+    .prepare("SELECT * FROM findings WHERE project_id = ? AND source = ?")
+    .all(input.projectId, input.source)
+    .map((row) => hydrateFinding(row as Record<string, unknown>));
+  let changed = false;
+
+  for (const finding of findings) {
+    if (finding.status === "accepted_risk" || finding.status === "resolved") {
+      continue;
+    }
+
+    db.prepare(
+      "UPDATE findings SET status = 'resolved', metadata_json = ?, updated_at = ? WHERE id = ?",
+    ).run(
+      serialise({
+        ...finding.metadata,
+        lastStatusNote: input.note?.trim() || (finding.metadata.lastStatusNote ?? null),
+      }),
+      timestamp,
+      finding.id,
+    );
+    changed = true;
+  }
+
+  if (changed) {
+    appendAuditEvent({
+      projectId: input.projectId,
+      actor: "finding",
+      action: "finding.source_resolved",
+      detail: `${input.source} no longer reports an active finding.`,
+      payload: {
+        source: input.source,
+        note: input.note?.trim() || null,
+      },
+    });
+    recomputeGateStatuses(input.projectId);
+  }
 }
 
 export function recomputeGateStatuses(
@@ -750,13 +1083,22 @@ export function recomputeGateStatuses(
   },
 ) {
   const db = getDb();
+  const projectRow = db
+    .prepare("SELECT * FROM projects WHERE id = ?")
+    .get(projectId) as Record<string, unknown> | undefined;
+
+  if (!projectRow) {
+    throw new Error("Project not found.");
+  }
+
+  const project = hydrateProject(projectRow);
   const workItems = hydrateProjectWorkItems(projectId);
   const findings = db
     .prepare("SELECT * FROM findings WHERE project_id = ?")
     .all(projectId)
     .map((row) => hydrateFinding(row as Record<string, unknown>));
   const artifacts = db
-    .prepare("SELECT * FROM artifacts WHERE project_id = ?")
+    .prepare("SELECT * FROM artifacts WHERE project_id = ? ORDER BY created_at DESC, rowid DESC")
     .all(projectId)
     .map((row) => hydrateArtifact(row as Record<string, unknown>));
 
@@ -765,7 +1107,8 @@ export function recomputeGateStatuses(
     securityStatus,
     deployStatus,
     releaseStatus,
-  } = resolveGateSnapshot(workItems, findings, artifacts);
+    gateSummary,
+  } = resolveGateSnapshot(project, workItems, findings, artifacts);
   const summary = {
     openFindings: findings.filter(
       (finding) => !["resolved", "accepted_risk"].includes(finding.status),
@@ -775,6 +1118,7 @@ export function recomputeGateStatuses(
       ["done", "waived"].includes(workItem.status),
     ).length,
     totalTasks: workItems.length,
+    ...gateSummary,
   };
 
   if (options?.persist === false) {
@@ -820,6 +1164,15 @@ export function recomputeGateStatuses(
 
 function autoCloseReviewedWorkItems(projectId: string) {
   const db = getDb();
+  const projectRow = db
+    .prepare("SELECT * FROM projects WHERE id = ?")
+    .get(projectId) as Record<string, unknown> | undefined;
+
+  if (!projectRow) {
+    return false;
+  }
+
+  const project = hydrateProject(projectRow);
   const workItems = hydrateProjectWorkItems(projectId);
   const dependencies = hydrateProjectDependencies(projectId);
   const findings = db
@@ -827,7 +1180,7 @@ function autoCloseReviewedWorkItems(projectId: string) {
     .all(projectId)
     .map((row) => hydrateFinding(row as Record<string, unknown>));
   const artifacts = db
-    .prepare("SELECT * FROM artifacts WHERE project_id = ?")
+    .prepare("SELECT * FROM artifacts WHERE project_id = ? ORDER BY created_at DESC, rowid DESC")
     .all(projectId)
     .map((row) => hydrateArtifact(row as Record<string, unknown>));
   const workItemsById = new Map(workItems.map((workItem) => [workItem.id, workItem]));
@@ -852,7 +1205,7 @@ function autoCloseReviewedWorkItems(projectId: string) {
 
     if (workItem.type === "release") {
       const otherWorkItems = workItems.filter((candidate) => candidate.id !== workItem.id);
-      const gates = resolveGateSnapshot(otherWorkItems, findings, artifacts);
+      const gates = resolveGateSnapshot(project, otherWorkItems, findings, artifacts);
       const otherTasksComplete = otherWorkItems.every((candidate) =>
         isTerminalWorkItemStatus(candidate.status),
       );

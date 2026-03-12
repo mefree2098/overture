@@ -1,6 +1,7 @@
 import { DEPLOYMENT_TARGETS } from "@/lib/constants";
 import type {
   DeploymentTarget,
+  LaunchTarget,
   ProjectLifecycleStage,
   ResearchProvider,
   WorkshopSearchMode,
@@ -76,6 +77,38 @@ export function deploymentTargetLabel(target: DeploymentTarget) {
     default:
       return "Local";
   }
+}
+
+export function isPlanningOnlyDeploymentTarget(target: DeploymentTarget) {
+  return target === "aws" || target === "azure";
+}
+
+export function deploymentTargetScopeNote(target: DeploymentTarget) {
+  if (!isPlanningOnlyDeploymentTarget(target)) {
+    return null;
+  }
+
+  return "Use a repo-level deploy.sh for this target. Overture can surface it when present, but final cloud validation still stays operator-owned.";
+}
+
+export function launchProfileMatchesDeploymentScope(
+  target: LaunchTarget,
+  deploymentTargets: DeploymentTarget[],
+) {
+  if (target === "ios_simulator") {
+    return deploymentTargets.some(
+      (candidate) => candidate === "ios_testflight" || candidate === "ios_app_store",
+    );
+  }
+
+  return deploymentTargets.includes("local");
+}
+
+export function deployProfileMatchesDeploymentScope(
+  target: DeploymentTarget,
+  deploymentTargets: DeploymentTarget[],
+) {
+  return deploymentTargets.includes(target);
 }
 
 export function toggleDeploymentTargetSelection(

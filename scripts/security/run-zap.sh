@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-OUTPUT_DIR="$ROOT_DIR/.overture/security"
+OUTPUT_DIR="${OUTPUT_DIR:-$ROOT_DIR/.overture/security}"
 CONFIG_FILE="$ROOT_DIR/scripts/security/zap-rules.conf"
 mkdir -p "$OUTPUT_DIR"
 
@@ -15,6 +15,11 @@ case "$TARGET_URL" in
     CONTAINER_TARGET_URL="${CONTAINER_TARGET_URL/localhost/host.docker.internal}"
     ;;
 esac
+
+if ! command -v docker >/dev/null 2>&1; then
+  echo "Docker is required for the ZAP baseline scan." >&2
+  exit 2
+fi
 
 docker run --rm \
   --add-host host.docker.internal:host-gateway \

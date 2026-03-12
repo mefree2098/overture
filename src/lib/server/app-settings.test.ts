@@ -70,4 +70,11 @@ describe("app settings", () => {
       }),
     ).toThrow("OpenAI Responses research requires OPENAI_API_KEY.");
   });
+
+  it("honors an execution-mode environment override when reading settings", async () => {
+    process.env.OVERTURE_DEFAULT_EXECUTION_MODE = "hosted_api";
+    const settingsModule = await import("@/lib/server/app-settings");
+
+    expect(settingsModule.getAppSettings().defaultExecutionMode).toBe("hosted_api");
+  });
 });

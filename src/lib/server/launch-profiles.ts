@@ -246,14 +246,31 @@ export function detectOperationalProfiles(project: ProjectRecord) {
     });
   }
 
-  const targetFiles: Array<[DraftDeployProfile["target"], string, string]> = [
-    ["jetson", "infra/jetson/README.md", "Jetson Orin deployment"],
-    ["raspberry_pi", "infra/raspberry-pi/README.md", "Raspberry Pi deployment"],
-    ["azure", "infra/azure/main.bicep", "Azure deployment"],
-    ["aws", "infra/aws/template.yaml", "AWS deployment"],
+  const targetFiles: Array<
+    [
+      DraftDeployProfile["target"],
+      string,
+      string,
+      string | null,
+    ]
+  > = [
+    ["jetson", "infra/jetson/README.md", "Jetson Orin deployment", null],
+    ["raspberry_pi", "infra/raspberry-pi/README.md", "Raspberry Pi deployment", null],
+    [
+      "azure",
+      "infra/azure/main.bicep",
+      "Azure VM deployment",
+      envConfig.OVERTURE_AZURE_HEALTHCHECK_URL || envConfig.OVERTURE_AZURE_APP_URL || null,
+    ],
+    [
+      "aws",
+      "infra/aws/template.yaml",
+      "AWS EC2 deployment",
+      envConfig.OVERTURE_AWS_HEALTHCHECK_URL || envConfig.OVERTURE_AWS_APP_URL || null,
+    ],
   ];
 
-  for (const [target, relativePath, label] of targetFiles) {
+  for (const [target, relativePath, label, configuredHealthUrl] of targetFiles) {
     if (!deployScriptExists || !existsSync(path.join(repoRoot, relativePath))) {
       continue;
     }
@@ -266,6 +283,13 @@ export function detectOperationalProfiles(project: ProjectRecord) {
       approvalRequired: target !== "local",
       metadata: {
         source: relativePath,
+        ...(configuredHealthUrl
+          ? {
+              healthcheckUrl: configuredHealthUrl.endsWith("/api/health")
+                ? configuredHealthUrl
+                : `${configuredHealthUrl.replace(/\/$/, "")}/api/health`,
+            }
+          : {}),
       },
     });
   }

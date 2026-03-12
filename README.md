@@ -9,7 +9,7 @@ Overture is a local-first AI delivery control plane. It now supports two ways to
 - the original quick path where you already have a finished `plan.md`
 - a new guided pipeline that helps you shape the prompt, run deep research, review the generated plan, execute it with Symphony, launch the result locally, and then deploy it
 
-The current app is a working Next.js control plane with SQLite persistence, real Codex-backed prompt/workshop and planning flows, vendored Symphony orchestration, artifact storage, gate tracking, launch/deploy runs, runtime observability, project deletion, and a settings area for model, research, and runtime defaults.
+The current app is a working Next.js control plane with SQLite persistence, real Codex-backed prompt/workshop and planning flows, vendored Symphony orchestration, artifact storage, gate tracking, mutable findings, per-project security review, launch/deploy runs, runtime observability, project deletion, and a settings area for model, research, and runtime defaults.
 
 ## What the platform does
 
@@ -22,7 +22,7 @@ The current app is a working Next.js control plane with SQLite persistence, real
 - Injects mandatory QA, security, deployment, observability, documentation, and release gates
 - Exposes a Linear-compatible tracker GraphQL surface for Symphony polling
 - Launches Symphony against a per-project workflow contract
-- Detects launch and deployment profiles from the target repository and records evidence for each run
+- Detects launch and deployment profiles from the target repository and records evidence for each supported run or publish path
 - Tracks gate readiness, runtime state, artifacts, findings, and audit history in the UI
 - Tracks both live-run token usage and the cumulative project token total across every run
 - Supports hard deletion of failed or stale projects from the dashboard and project page
@@ -67,8 +67,7 @@ Thinking level works like this:
 Research-provider selection works like this:
 
 - `codex_native` is the default local-first research provider
-- `openai_responses` is the hosted/API fallback
-- `tavily_mcp` and `brave_mcp` remain optional fallbacks
+- `openai_responses` is the hosted/API fallback when `OPENAI_API_KEY` is available
 
 ## Stack
 
@@ -182,6 +181,30 @@ Quick health check:
 curl http://127.0.0.1:3000/api/health
 ```
 
+## Cloud quick start
+
+The Azure and AWS helpers now publish the current repo as a single-instance cloud control plane instead of leaving only placeholder baselines behind.
+
+Azure:
+
+```bash
+AZURE_RESOURCE_GROUP=my-overture-rg OPENAI_API_KEY=sk-live-... bash deploy.sh azure
+```
+
+AWS:
+
+```bash
+AWS_REGION=us-west-2 OPENAI_API_KEY=sk-live-... bash deploy.sh aws
+```
+
+Cloud deploy behavior:
+
+- Both targets inject `OPENAI_API_KEY` and force the product default execution mode to `hosted_api`
+- Azure builds remotely in ACR; AWS builds locally with Docker buildx and pushes to ECR
+- Both targets run Overture as a single container on a dedicated VM/EC2 host with persistent `.overture` state on the instance filesystem
+- Both targets expose port `3000` directly and print `OVERTURE_APP_URL` plus `OVERTURE_HEALTHCHECK_URL` when the deploy completes
+- Overture can publish these targets from the handoff flow, but release verification still treats final cloud validation as operator-owned
+
 ## Settings and model control
 
 Open `/settings` in the UI to control:
@@ -280,11 +303,13 @@ DELETE /api/projects/:projectId
 - `npm run test`: Vitest
 - `npm run e2e`: Playwright against an isolated `.overture-e2e` runtime
 - `npm run qa`: lint, unit tests, and production build
-- `npm run security`: Semgrep and Trivy
-- `npm run security:zap`: ZAP baseline against a running app
+- `npm run security`: Semgrep and Trivy against the Overture repo itself
+- `npm run security:zap`: ZAP baseline against a running Overture app
 - `npm run deploy:local`: Docker Compose local deployment helper
 
-Deployment helper targets:
+Project-level security review is available from the project Overview tab. It writes per-project findings and evidence artifacts instead of scanning the control-plane repo globally. If Semgrep, Trivy, or ZAP cannot run, or if the workspace sample is truncated for a very large repo, Overture records the review as partial instead of silently passing the security gate.
+
+Supported deployment helper targets:
 
 - `bash deploy.sh local`
 - `bash deploy.sh jetson`
@@ -293,6 +318,8 @@ Deployment helper targets:
 - `bash deploy.sh aws`
 - `bash deploy.sh ios_testflight`
 - `bash deploy.sh ios_app_store`
+
+The Azure and AWS targets now provision real single-instance cloud hosts. Overture can publish them directly, but the release gate still remains partial until you validate the live cloud environment yourself.
 
 ## Verification flow
 
