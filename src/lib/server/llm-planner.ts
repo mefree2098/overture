@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { z } from "zod";
-import { DEPLOYMENT_TARGETS } from "@/lib/constants";
+import { DEFAULT_POLICY_PROFILE, DEPLOYMENT_TARGETS } from "@/lib/constants";
 import { normalizeCodexReasoningEffort } from "@/lib/codex-reasoning";
 import { getWorkspaceRoot } from "@/lib/server/storage";
 import {
@@ -21,6 +21,7 @@ import {
 import type {
   CodexReasoningEffort,
   CreateProjectInput,
+  PolicyProfile,
   DeploymentTarget,
   SpecIR,
 } from "@/lib/types";
@@ -173,7 +174,20 @@ function normalizeDeploymentTargets(targets: DeploymentTarget[]) {
   return [...new Set(targets.filter((target) => DEPLOYMENT_TARGETS.includes(target)))];
 }
 
-function buildPlannerPrompt(input: Pick<CreateProjectInput, "name" | "executionMode" | "specText">) {
+function buildPlannerPrompt(
+  input: Pick<CreateProjectInput, "name" | "executionMode" | "specText" | "policyProfile">,
+) {
+  const deploymentTargets =
+    input.policyProfile?.deploymentTargets?.length
+      ? normalizeDeploymentTargets(input.policyProfile.deploymentTargets)
+      : DEFAULT_POLICY_PROFILE.deploymentTargets;
+  const policyProfile: PolicyProfile = {
+    qaStrictness: input.policyProfile?.qaStrictness ?? DEFAULT_POLICY_PROFILE.qaStrictness,
+    securityStrictness:
+      input.policyProfile?.securityStrictness ?? DEFAULT_POLICY_PROFILE.securityStrictness,
+    deploymentTargets,
+  };
+
   return [
     "You are the canonical planning engine for Overture.",
     "Read the attached deep research implementation plan and produce an executable software delivery model.",
@@ -185,11 +199,16 @@ function buildPlannerPrompt(input: Pick<CreateProjectInput, "name" | "executionM
     "Do not duplicate the same work at milestone and epic level.",
     "If a milestone has epics, only use milestone.tasks for true cross-cutting prerequisites or sequence gates; otherwise leave milestone.tasks empty.",
     "Combine closely related implementation steps instead of turning every sentence into a ticket.",
+    "Use the policy profile to scale QA, security, and deployment obligations.",
+    "Do not broaden deployment work beyond the required deployment targets unless the source plan explicitly requires it.",
     "Task titles must be short, concrete, and implementation-ready.",
     "Preserve important QA, security, deployment, platform, and UX obligations from the source plan.",
     "Ignore citation markers and focus on actionable delivery work.",
     `Project name: ${input.name}`,
     `Execution mode: ${input.executionMode}`,
+    `QA strictness: ${policyProfile.qaStrictness}/5`,
+    `Security strictness: ${policyProfile.securityStrictness}/5`,
+    `Required deployment targets: ${policyProfile.deploymentTargets.join(", ") || "none"}`,
     "",
     "Source plan:",
     input.specText,
@@ -199,7 +218,12 @@ function buildPlannerPrompt(input: Pick<CreateProjectInput, "name" | "executionM
 function runCodexPlanner(
   input: Pick<
     CreateProjectInput,
-    "name" | "executionMode" | "specText" | "plannerModel" | "plannerReasoningEffort"
+    | "name"
+    | "executionMode"
+    | "specText"
+    | "plannerModel"
+    | "plannerReasoningEffort"
+    | "policyProfile"
   >,
   schemaPath: string,
   resultPath: string,
@@ -308,7 +332,12 @@ function runCodexPlanner(
 export async function buildSpecIrWithLlm(
   input: Pick<
     CreateProjectInput,
-    "name" | "executionMode" | "specText" | "plannerModel" | "plannerReasoningEffort"
+    | "name"
+    | "executionMode"
+    | "specText"
+    | "plannerModel"
+    | "plannerReasoningEffort"
+    | "policyProfile"
   >,
 ): Promise<{ specIr: SpecIR; tokenUsage: TokenUsage | null }> {
   if (!codexCliAvailable()) {

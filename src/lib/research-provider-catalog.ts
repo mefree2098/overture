@@ -17,14 +17,4 @@ export const RESEARCH_PROVIDER_OPTIONS: ResearchProviderOption[] = [
     label: "OpenAI Responses",
     description: "Uses the hosted Responses API with web search when an API key is available.",
   },
-  {
-    value: "tavily_mcp",
-    label: "Tavily MCP",
-    description: "Optional MCP-backed research provider for custom deployments.",
-  },
-  {
-    value: "brave_mcp",
-    label: "Brave MCP",
-    description: "Optional MCP-backed research provider for custom deployments.",
-  },
 ];

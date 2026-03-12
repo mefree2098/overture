@@ -13,9 +13,7 @@ const updateProjectSchema = z
     name: z.string().trim().min(2).max(120).optional(),
     repoSource: z.string().trim().min(1).max(500).optional(),
     executionMode: z.enum(["local_chatgpt", "hosted_api"]).optional(),
-    researchProvider: z
-      .enum(["codex_native", "openai_responses", "tavily_mcp", "brave_mcp"])
-      .optional(),
+    researchProvider: z.enum(["codex_native", "openai_responses"]).optional(),
     plannerModel: z.string().max(120).nullable().optional(),
     executionModel: z.string().max(120).nullable().optional(),
     plannerReasoningEffort: z.enum(["low", "medium", "high", "xhigh"]).optional(),

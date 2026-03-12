@@ -13,13 +13,24 @@ const sharedProjectSchema = {
   name: z.string().min(2).max(120),
   repoSource: z.string().min(1).max(500),
   executionMode: z.enum(["local_chatgpt", "hosted_api"]),
-  researchProvider: z
-    .enum(["codex_native", "openai_responses", "tavily_mcp", "brave_mcp"])
-    .optional(),
+  researchProvider: z.enum(["codex_native", "openai_responses"]).optional(),
   policyProfile: z
     .object({
       qaStrictness: z.number().min(1).max(5).optional(),
       securityStrictness: z.number().min(1).max(5).optional(),
+      deploymentTargets: z
+        .array(
+          z.enum([
+            "local",
+            "jetson",
+            "raspberry_pi",
+            "azure",
+            "aws",
+            "ios_testflight",
+            "ios_app_store",
+          ]),
+        )
+        .optional(),
     })
     .optional(),
   plannerModel: z.string().max(120).nullable().optional(),

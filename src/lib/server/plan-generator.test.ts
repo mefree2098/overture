@@ -156,4 +156,56 @@ Epic: Verification loop
     expect(milestoneTaskKeys).toHaveLength(0);
     expect(epicTitles).toEqual(expect.arrayContaining(["Persistence", "Runtime"]));
   });
+
+  it("uses the policy profile to scope deployment work and avoids duplicate edges for standalone epics", () => {
+    const result = generatePlanFromSpec(
+      {
+        summary: "Scope delivery work with lean deployment obligations.",
+        outline: [],
+        sections: [],
+        features: [],
+        roles: [],
+        entities: [],
+        integrations: [],
+        constraints: [],
+        risks: [],
+        acceptanceCriteria: [],
+        deploymentTargets: ["aws"],
+        milestones: [
+          { name: "Foundation", tasks: ["Create the project baseline"] },
+          { name: "Release prep", tasks: ["Prepare the release checklist"] },
+        ],
+        epics: [
+          {
+            name: "Shared tooling",
+            tasks: ["Add CI automation"],
+          },
+        ],
+        openQuestions: [],
+      },
+      {
+        qaStrictness: 2,
+        securityStrictness: 5,
+        deploymentTargets: ["local", "aws"],
+      },
+    );
+
+    const deploymentWorkstream = result.workItems.find(
+      (item) => item.title === "Deployment verification matrix",
+    );
+    const standaloneEpic = result.workItems.find((item) => item.title === "Shared tooling");
+    const blockingEdges = result.dependencyEdges.filter(
+      (edge) => edge.toWorkItemId === standaloneEpic?.id,
+    );
+
+    expect(deploymentWorkstream?.description).toContain("Local");
+    expect(deploymentWorkstream?.description).toContain("AWS");
+    expect(deploymentWorkstream?.acceptanceCriteria).toEqual(
+      expect.arrayContaining([
+        "Local deployment is smoke tested",
+        "AWS deployment path is documented or verified",
+      ]),
+    );
+    expect(blockingEdges).toHaveLength(1);
+  });
 });

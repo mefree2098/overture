@@ -231,6 +231,10 @@ export function ProjectCreateForm({
             repoSource,
             executionMode,
             researchProvider,
+            policyProfile: {
+              qaStrictness,
+              securityStrictness,
+            },
             plannerModel: plannerModel.trim() || null,
             executionModel: executionModel.trim() || null,
             plannerReasoningEffort,

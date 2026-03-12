@@ -70,8 +70,6 @@ export const PROJECT_LIFECYCLE_STAGES = [
 export const RESEARCH_PROVIDERS = [
   "codex_native",
   "openai_responses",
-  "tavily_mcp",
-  "brave_mcp",
 ] as const;
 
 export const LAUNCH_TARGETS = ["web", "api", "docker", "ios_simulator"] as const;
@@ -98,7 +96,11 @@ export const TRACKER_STATE_NAMES = [
 export const DEFAULT_POLICY_PROFILE = {
   qaStrictness: 4,
   securityStrictness: 4,
-  deploymentTargets: [...DEPLOYMENT_TARGETS],
+  deploymentTargets: ["local"],
+} satisfies {
+  qaStrictness: number;
+  securityStrictness: number;
+  deploymentTargets: Array<(typeof DEPLOYMENT_TARGETS)[number]>;
 };
 
 export const DEFAULT_APP_SETTINGS = {

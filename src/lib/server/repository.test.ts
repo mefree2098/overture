@@ -276,6 +276,27 @@ describe("repository lifecycle", () => {
     expect(sourceBrief?.mimeType).toBe("text/markdown");
   });
 
+  it("persists guided policy settings on draft projects", async () => {
+    const repository = await import("@/lib/server/repository");
+
+    const created = repository.createDraftProject({
+      name: "Guided Policy Profile",
+      repoSource: ".",
+      executionMode: "local_chatgpt",
+      policyProfile: {
+        qaStrictness: 2,
+        securityStrictness: 5,
+        deploymentTargets: ["local", "aws"],
+      },
+    });
+
+    const snapshot = repository.getProjectSnapshot(created.projectId);
+
+    expect(snapshot?.project.qaStrictness).toBe(2);
+    expect(snapshot?.project.securityStrictness).toBe(5);
+    expect(snapshot?.project.deploymentTargets).toEqual(["local", "aws"]);
+  });
+
   it("records research runs without writing non-work-item run ids into audit foreign keys", async () => {
     const repository = await import("@/lib/server/repository");
 
@@ -436,5 +457,48 @@ describe("repository lifecycle", () => {
 
     expect(settledEpic?.status).toBe("done");
     expect(settledEpicLeaf?.status).toBe("queued");
+  });
+
+  it("does not satisfy deploy status from launch evidence and fails release on deploy findings", async () => {
+    const repository = await import("@/lib/server/repository");
+
+    const created = await repository.createProjectFromSpec({
+      name: "Deploy Gate Accuracy",
+      repoSource: ".",
+      executionMode: "local_chatgpt",
+      specFilename: "plan.md",
+      specText: "# Blueprint\n\n## Goal\nKeep deploy gates grounded in deployment evidence",
+    });
+
+    const initial = repository.getProjectSnapshot(created.projectId);
+
+    repository.writeArtifact({
+      projectId: created.projectId,
+      projectSlug: created.slug,
+      kind: "launch-report",
+      label: "Launch evidence",
+      extension: "md",
+      mimeType: "text/markdown",
+      content: "# Launch report",
+    });
+
+    const afterLaunch = repository.getProjectSnapshot(created.projectId);
+
+    repository.createFinding({
+      projectId: created.projectId,
+      category: "deploy",
+      severity: "medium",
+      status: "open",
+      title: "Broken deploy step",
+      detail: "Deployment verification is incomplete.",
+      source: "qa-review",
+    });
+
+    const afterFinding = repository.getProjectSnapshot(created.projectId);
+
+    expect(initial?.gateStatus.deployStatus).toBe("pending");
+    expect(afterLaunch?.gateStatus.deployStatus).toBe("pending");
+    expect(afterFinding?.gateStatus.deployStatus).toBe("fail");
+    expect(afterFinding?.gateStatus.releaseStatus).toBe("fail");
   });
 });

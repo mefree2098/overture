@@ -1,4 +1,6 @@
+import { DEPLOYMENT_TARGETS } from "@/lib/constants";
 import type {
+  DeploymentTarget,
   ProjectLifecycleStage,
   ResearchProvider,
   WorkshopSearchMode,
@@ -35,12 +37,26 @@ export function normalizeResearchProvider(
 ): ResearchProvider {
   switch (value) {
     case "openai_responses":
-    case "tavily_mcp":
-    case "brave_mcp":
       return value;
     default:
       return "codex_native";
   }
+}
+
+export function normalizeDeploymentTargets(
+  value: string[] | null | undefined,
+): DeploymentTarget[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return [...new Set(
+    value.filter(
+      (target): target is DeploymentTarget =>
+        typeof target === "string" &&
+        DEPLOYMENT_TARGETS.includes(target as DeploymentTarget),
+    ),
+  )];
 }
 
 export function normalizeWorkshopSearchMode(
@@ -96,10 +112,6 @@ export function researchProviderLabel(provider: ResearchProvider) {
   switch (provider) {
     case "openai_responses":
       return "OpenAI Responses";
-    case "tavily_mcp":
-      return "Tavily MCP";
-    case "brave_mcp":
-      return "Brave MCP";
     default:
       return "Codex native";
   }

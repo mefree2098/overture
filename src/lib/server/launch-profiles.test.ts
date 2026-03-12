@@ -76,4 +76,29 @@ describe("detectOperationalProfiles", () => {
       "http://host.docker.internal:4020/api/health",
     );
   });
+
+  it("does not expose scripted cloud deploy targets unless deploy.sh exists", () => {
+    mkdirSync(path.join(repoRoot, "infra", "aws"), { recursive: true });
+    writeFileSync(path.join(repoRoot, "infra", "aws", "template.yaml"), "Resources: {}\n", "utf8");
+
+    const detected = detectOperationalProfiles(makeProject(repoRoot));
+
+    expect(detected.deployProfiles.find((profile) => profile.target === "aws")).toBeUndefined();
+  });
+
+  it("uses workspace-aware xcodebuild commands when an xcworkspace is present", () => {
+    mkdirSync(path.join(repoRoot, "PenPal.xcworkspace"), { recursive: true });
+
+    const detected = detectOperationalProfiles(makeProject(repoRoot));
+    const simulatorLaunch = detected.launchProfiles.find(
+      (profile) => profile.target === "ios_simulator",
+    );
+    const testflightDeploy = detected.deployProfiles.find(
+      (profile) => profile.target === "ios_testflight",
+    );
+
+    expect(simulatorLaunch?.command).toContain('-workspace "PenPal.xcworkspace"');
+    expect(simulatorLaunch?.command).not.toContain("-project");
+    expect(testflightDeploy?.command).toContain('-workspace "PenPal.xcworkspace"');
+  });
 });

@@ -425,6 +425,7 @@ export interface CreateDraftProjectInput {
   name: string;
   repoSource: string;
   executionMode: ExecutionMode;
+  policyProfile?: Partial<typeof DEFAULT_POLICY_PROFILE>;
   sourceBriefText?: string | null;
   sourceBriefFilename?: string | null;
   plannerModel?: string | null;

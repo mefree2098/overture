@@ -4,6 +4,7 @@ import path from "node:path";
 import { DEFAULT_POLICY_PROFILE } from "@/lib/constants";
 import { normalizeCodexReasoningEffort } from "@/lib/codex-reasoning";
 import {
+  normalizeDeploymentTargets,
   normalizeLifecycleStage,
   normalizeResearchProvider,
   normalizeWorkshopSearchMode,
@@ -163,7 +164,7 @@ function resolveGateSnapshot(
     ? "fail"
     : deployTasksComplete ||
         artifacts.some((artifact) =>
-          ["deploy-plan", "deployment-report", "launch-report"].includes(artifact.kind),
+          ["deploy-plan", "deployment-report", "deployment-log"].includes(artifact.kind),
         )
       ? "pass"
       : "pending";
@@ -173,7 +174,7 @@ function resolveGateSnapshot(
     deployStatus === "pass" &&
     allTasksComplete
       ? "pass"
-      : hasOpenSecurityFinding || hasOpenQaFinding
+      : hasOpenSecurityFinding || hasOpenQaFinding || hasOpenDeployFinding
         ? "fail"
         : "pending";
 
@@ -230,7 +231,9 @@ function hydrateProject(row: Record<string, unknown>): ProjectRecord {
     health: row.health as ProjectRecord["health"],
     qaStrictness: Number(row.qa_strictness),
     securityStrictness: Number(row.security_strictness),
-    deploymentTargets: tryParseJson(row.deployment_targets_json as string),
+    deploymentTargets: normalizeDeploymentTargets(
+      tryParseJson<string[]>(row.deployment_targets_json as string),
+    ),
     cumulativeTokenUsage: hydrateStoredProjectTokenUsage(row),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at),
@@ -917,6 +920,34 @@ function resolveProjectDefaults(
   };
 }
 
+function resolvePolicyProfile(
+  input: Pick<CreateDraftProjectInput | CreateProjectInput, "policyProfile">,
+  appSettings = getAppSettings(),
+) {
+  const deploymentTargets = normalizeDeploymentTargets(
+    input.policyProfile?.deploymentTargets,
+  );
+
+  return {
+    ...DEFAULT_POLICY_PROFILE,
+    qaStrictness: clamp(
+      Number(input.policyProfile?.qaStrictness ?? appSettings.defaultQaStrictness),
+      1,
+      5,
+    ),
+    securityStrictness: clamp(
+      Number(
+        input.policyProfile?.securityStrictness ?? appSettings.defaultSecurityStrictness,
+      ),
+      1,
+      5,
+    ),
+    deploymentTargets: deploymentTargets.length
+      ? deploymentTargets
+      : DEFAULT_POLICY_PROFILE.deploymentTargets,
+  };
+}
+
 function insertProjectRecord(input: {
   id: string;
   slug: string;
@@ -1001,11 +1032,7 @@ export function createDraftProject(input: CreateDraftProjectInput) {
   const projectId = randomUUID();
   const slug = nextProjectSlug(db, input.name, projectId);
   const defaults = resolveProjectDefaults(input, appSettings);
-  const policyProfile = {
-    ...DEFAULT_POLICY_PROFILE,
-    qaStrictness: appSettings.defaultQaStrictness,
-    securityStrictness: appSettings.defaultSecurityStrictness,
-  };
+  const policyProfile = resolvePolicyProfile(input, appSettings);
 
   insertProjectRecord({
     id: projectId,
@@ -1021,7 +1048,7 @@ export function createDraftProject(input: CreateDraftProjectInput) {
     executionReasoningEffort: defaults.executionReasoningEffort,
     qaStrictness: policyProfile.qaStrictness,
     securityStrictness: policyProfile.securityStrictness,
-    deploymentTargets: DEFAULT_POLICY_PROFILE.deploymentTargets,
+    deploymentTargets: policyProfile.deploymentTargets,
     symphonyMaxConcurrentAgents: defaults.symphonyMaxConcurrentAgents,
     symphonyMaxTurns: defaults.symphonyMaxTurns,
     timestamp,
@@ -1037,6 +1064,9 @@ export function createDraftProject(input: CreateDraftProjectInput) {
       researchProvider: defaults.researchProvider,
       plannerModel: defaults.plannerModel,
       executionModel: defaults.executionModel,
+      qaStrictness: policyProfile.qaStrictness,
+      securityStrictness: policyProfile.securityStrictness,
+      deploymentTargets: policyProfile.deploymentTargets,
     },
   });
 
@@ -2338,6 +2368,9 @@ async function ingestProjectPlan(input: {
   executionModel: string | null;
   plannerReasoningEffort: ProjectRecord["plannerReasoningEffort"];
   executionReasoningEffort: ProjectRecord["executionReasoningEffort"];
+  qaStrictness: number;
+  securityStrictness: number;
+  deploymentTargets: ProjectRecord["deploymentTargets"];
   symphonyMaxConcurrentAgents: number;
   symphonyMaxTurns: number;
   repoSource: string;
@@ -2364,8 +2397,17 @@ async function ingestProjectPlan(input: {
     specText: input.specText,
     plannerModel: input.plannerModel,
     plannerReasoningEffort: input.plannerReasoningEffort,
+    policyProfile: {
+      qaStrictness: input.qaStrictness,
+      securityStrictness: input.securityStrictness,
+      deploymentTargets: input.deploymentTargets,
+    },
   });
-  const plan = generatePlanFromSpec(specIr);
+  const plan = generatePlanFromSpec(specIr, {
+    qaStrictness: input.qaStrictness,
+    securityStrictness: input.securityStrictness,
+    deploymentTargets: input.deploymentTargets,
+  });
   const generatedIdMap = new Map(
     plan.workItems.map((workItem) => [workItem.id, randomUUID()]),
   );
@@ -2388,6 +2430,9 @@ async function ingestProjectPlan(input: {
       `Execution model: ${input.executionModel ?? "Codex default"}`,
       `Planning thinking level: ${input.plannerReasoningEffort}`,
       `Agent thinking level: ${input.executionReasoningEffort}`,
+      `QA strictness: ${input.qaStrictness}/5`,
+      `Security strictness: ${input.securityStrictness}/5`,
+      `Deployment targets: ${input.deploymentTargets.join(", ") || "none"}`,
       `Symphony parallel agents: ${input.symphonyMaxConcurrentAgents}`,
       `Symphony max turns: ${input.symphonyMaxTurns}`,
       "",
@@ -2418,6 +2463,9 @@ async function ingestProjectPlan(input: {
         executionModel: input.executionModel,
         plannerReasoningEffort: input.plannerReasoningEffort,
         executionReasoningEffort: input.executionReasoningEffort,
+        qaStrictness: input.qaStrictness,
+        securityStrictness: input.securityStrictness,
+        deploymentTargets: input.deploymentTargets,
         symphonyMaxConcurrentAgents: input.symphonyMaxConcurrentAgents,
         symphonyMaxTurns: input.symphonyMaxTurns,
       }),
@@ -2609,6 +2657,9 @@ export async function ingestApprovedPlan(input: {
     executionModel: snapshot.project.executionModel,
     plannerReasoningEffort: snapshot.project.plannerReasoningEffort,
     executionReasoningEffort: snapshot.project.executionReasoningEffort,
+    qaStrictness: snapshot.project.qaStrictness,
+    securityStrictness: snapshot.project.securityStrictness,
+    deploymentTargets: snapshot.project.deploymentTargets,
     symphonyMaxConcurrentAgents: snapshot.project.symphonyMaxConcurrentAgents,
     symphonyMaxTurns: snapshot.project.symphonyMaxTurns,
     repoSource: snapshot.project.repoSource,
@@ -2632,12 +2683,7 @@ export async function createProjectFromSpec(input: CreateProjectInput) {
   const projectId = randomUUID();
   const slug = nextProjectSlug(db, input.name, projectId);
   const defaults = resolveProjectDefaults(input, appSettings);
-  const policyProfile = {
-    ...DEFAULT_POLICY_PROFILE,
-    ...input.policyProfile,
-    deploymentTargets:
-      input.policyProfile?.deploymentTargets ?? DEFAULT_POLICY_PROFILE.deploymentTargets,
-  };
+  const policyProfile = resolvePolicyProfile(input, appSettings);
 
   insertProjectRecord({
     id: projectId,
@@ -2668,6 +2714,9 @@ export async function createProjectFromSpec(input: CreateProjectInput) {
     executionModel: defaults.executionModel,
     plannerReasoningEffort: defaults.plannerReasoningEffort,
     executionReasoningEffort: defaults.executionReasoningEffort,
+    qaStrictness: policyProfile.qaStrictness,
+    securityStrictness: policyProfile.securityStrictness,
+    deploymentTargets: policyProfile.deploymentTargets,
     symphonyMaxConcurrentAgents: defaults.symphonyMaxConcurrentAgents,
     symphonyMaxTurns: defaults.symphonyMaxTurns,
     repoSource: defaults.repoSource,
@@ -2689,6 +2738,9 @@ export async function createProjectFromSpec(input: CreateProjectInput) {
       executionModel: defaults.executionModel,
       plannerReasoningEffort: defaults.plannerReasoningEffort,
       executionReasoningEffort: defaults.executionReasoningEffort,
+      qaStrictness: policyProfile.qaStrictness,
+      securityStrictness: policyProfile.securityStrictness,
+      deploymentTargets: policyProfile.deploymentTargets,
     },
   });
 

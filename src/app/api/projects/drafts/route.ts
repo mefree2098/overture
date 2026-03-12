@@ -9,11 +9,28 @@ const draftProjectSchema = z.object({
   name: z.string().min(2).max(120),
   repoSource: z.string().min(1).max(500),
   executionMode: z.enum(["local_chatgpt", "hosted_api"]),
+  policyProfile: z
+    .object({
+      qaStrictness: z.number().min(1).max(5).optional(),
+      securityStrictness: z.number().min(1).max(5).optional(),
+      deploymentTargets: z
+        .array(
+          z.enum([
+            "local",
+            "jetson",
+            "raspberry_pi",
+            "azure",
+            "aws",
+            "ios_testflight",
+            "ios_app_store",
+          ]),
+        )
+        .optional(),
+    })
+    .optional(),
   sourceBriefText: z.string().min(20).nullable().optional(),
   sourceBriefFilename: z.string().min(1).max(240).nullable().optional(),
-  researchProvider: z
-    .enum(["codex_native", "openai_responses", "tavily_mcp", "brave_mcp"])
-    .optional(),
+  researchProvider: z.enum(["codex_native", "openai_responses"]).optional(),
   plannerModel: z.string().max(120).nullable().optional(),
   executionModel: z.string().max(120).nullable().optional(),
   plannerReasoningEffort: z.enum(["low", "medium", "high", "xhigh"]).optional(),

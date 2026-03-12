@@ -1,8 +1,10 @@
 import { DEFAULT_POLICY_PROFILE } from "@/lib/constants";
 import type {
+  DeploymentTarget,
   GeneratedDependencyEdge,
   GeneratedWorkItem,
   PlanGenerationResult,
+  PolicyProfile,
   SpecIR,
   WorkItemType,
 } from "@/lib/types";
@@ -92,11 +94,116 @@ function createEdge(
   };
 }
 
-export function generatePlanFromSpec(specIr: SpecIR): PlanGenerationResult {
+function deploymentTargetLabel(target: DeploymentTarget) {
+  switch (target) {
+    case "aws":
+      return "AWS";
+    case "azure":
+      return "Azure";
+    case "jetson":
+      return "Jetson Orin";
+    case "local":
+      return "Local";
+    case "raspberry_pi":
+      return "Raspberry Pi";
+    case "ios_testflight":
+      return "iOS TestFlight";
+    case "ios_app_store":
+      return "iOS App Store";
+    default:
+      return target.charAt(0).toUpperCase() + target.slice(1);
+  }
+}
+
+function uniqueTargets(targets: DeploymentTarget[]) {
+  return [...new Set(targets)];
+}
+
+function sameTargets(left: DeploymentTarget[], right: DeploymentTarget[]) {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  const leftSorted = [...left].sort();
+  const rightSorted = [...right].sort();
+  return leftSorted.every((target, index) => target === rightSorted[index]);
+}
+
+function resolveDeploymentTargets(
+  specIr: SpecIR,
+  policyProfile: PolicyProfile,
+): DeploymentTarget[] {
+  const configuredTargets = uniqueTargets(policyProfile.deploymentTargets);
+  const specTargets = uniqueTargets(specIr.deploymentTargets);
+
+  if (sameTargets(configuredTargets, DEFAULT_POLICY_PROFILE.deploymentTargets)) {
+    const combined = uniqueTargets([...configuredTargets, ...specTargets]);
+    return combined.length ? combined : [...DEFAULT_POLICY_PROFILE.deploymentTargets];
+  }
+
+  return configuredTargets.length ? configuredTargets : specTargets;
+}
+
+function qaAcceptanceCriteria(strictness: number) {
+  const criteria = ["Build passes without unresolved warnings in critical flows"];
+
+  if (strictness >= 2) {
+    criteria.push("Smoke coverage exercises the primary user path");
+  }
+  if (strictness >= 3) {
+    criteria.push("Automated regression checks pass before closure");
+  }
+  if (strictness >= 4) {
+    criteria.push("Evidence includes browser or UI verification artifacts");
+  }
+  if (strictness >= 5) {
+    criteria.push("Regression coverage documents edge cases and failure handling");
+  }
+
+  return criteria;
+}
+
+function securityAcceptanceCriteria(strictness: number) {
+  const criteria = ["No unresolved high or critical findings"];
+
+  if (strictness >= 2) {
+    criteria.push("Dependency and secrets scans are reviewed");
+  }
+  if (strictness >= 3) {
+    criteria.push("Threat notes capture the main abuse and trust boundaries");
+  }
+  if (strictness >= 4) {
+    criteria.push("SAST or equivalent static analysis runs before closure");
+  }
+  if (strictness >= 5) {
+    criteria.push("Waivers include owner, expiry, and remediation rationale");
+  }
+
+  return criteria;
+}
+
+function deploymentAcceptanceCriteria(targets: DeploymentTarget[]) {
+  if (!targets.length) {
+    return ["Deployment posture is explicitly marked as not in scope for this project"];
+  }
+
+  return targets.map((target) =>
+    target === "local"
+      ? "Local deployment is smoke tested"
+      : `${deploymentTargetLabel(target)} deployment path is documented or verified`,
+  );
+}
+
+export function generatePlanFromSpec(
+  specIr: SpecIR,
+  policyProfile: PolicyProfile = DEFAULT_POLICY_PROFILE,
+): PlanGenerationResult {
   const workItems: GeneratedWorkItem[] = [];
   const dependencyEdges: GeneratedDependencyEdge[] = [];
   const milestoneIdsByName = new Map<string, string>();
   const epicNamesByMilestone = new Map<string, Set<string>>();
+  const deploymentTargets = resolveDeploymentTargets(specIr, policyProfile);
+  const deploymentSummary = deploymentTargets.map(deploymentTargetLabel).join(", ");
   let sortOrder = 0;
   let edgeOrder = 0;
   let previousMilestoneId: string | null = null;
@@ -185,7 +292,7 @@ export function generatePlanFromSpec(specIr: SpecIR): PlanGenerationResult {
         title: epic.name,
         description: `Canonical backlog epic derived from the plan: ${epic.name}.`,
         type: inferType(epic.name),
-        status: "blocked",
+        status: milestoneParentId || previousMilestoneId ? "blocked" : "queued",
         priority: 3,
         sortOrder: sortOrder++,
         parentId: milestoneParentId,
@@ -200,6 +307,8 @@ export function generatePlanFromSpec(specIr: SpecIR): PlanGenerationResult {
 
     if (milestoneParentId) {
       dependencyEdges.push(createEdge(edgeOrder++, milestoneParentId, epicId));
+    } else if (previousMilestoneId) {
+      dependencyEdges.push(createEdge(edgeOrder++, previousMilestoneId, epicId));
     }
 
     epic.tasks.forEach((taskTitle, taskIndex) => {
@@ -224,9 +333,6 @@ export function generatePlanFromSpec(specIr: SpecIR): PlanGenerationResult {
       );
 
       dependencyEdges.push(createEdge(edgeOrder++, epicId, taskId));
-      if (!milestoneParentId && previousMilestoneId) {
-        dependencyEdges.push(createEdge(edgeOrder++, previousMilestoneId, epicId));
-      }
     });
   });
 
@@ -235,35 +341,31 @@ export function generatePlanFromSpec(specIr: SpecIR): PlanGenerationResult {
       key: "QA",
       title: "Mandatory QA gate stack",
       description:
-        "Run unit, integration, e2e, lint, build, screenshot capture, and smoke flows before closure.",
+        policyProfile.qaStrictness >= 4
+          ? "Run lint, build, smoke, regression, and evidence capture flows before closure."
+          : "Run lean but explicit build, smoke, and regression checks before closure.",
       type: "qa" as const,
-      acceptanceCriteria: [
-        "Playwright evidence captured",
-        "All required tests passing",
-        "Warnings triaged or removed",
-      ],
+      acceptanceCriteria: qaAcceptanceCriteria(policyProfile.qaStrictness),
     },
     {
       key: "SEC",
       title: "Mandatory security loop",
       description:
-        "Threat notes, SAST, dependency scan, secrets scan, and DAST baseline with remediation tracking.",
+        policyProfile.securityStrictness >= 4
+          ? "Threat notes, static analysis, dependency review, and secrets hygiene stay in the delivery loop."
+          : "Security checks stay scoped to the highest-risk paths and obvious dependency exposure.",
       type: "security" as const,
-      acceptanceCriteria: [
-        "No unresolved high or critical findings",
-        "Waivers include owner and expiry",
-      ],
+      acceptanceCriteria: securityAcceptanceCriteria(policyProfile.securityStrictness),
     },
     {
       key: "DEP",
       title: "Deployment verification matrix",
       description:
-        "Local, Jetson, Azure, and AWS deployment planning with attached evidence and smoke status.",
+        deploymentTargets.length
+          ? `Deployment planning and evidence for ${deploymentSummary}.`
+          : "Deployment work is only tracked when the project explicitly requires a target.",
       type: "deploy" as const,
-      acceptanceCriteria: [
-        "Local deployment is smoke tested",
-        "Jetson/Azure/AWS plans are generated and linked",
-      ],
+      acceptanceCriteria: deploymentAcceptanceCriteria(deploymentTargets),
     },
     {
       key: "OBS",
@@ -346,7 +448,9 @@ export function generatePlanFromSpec(specIr: SpecIR): PlanGenerationResult {
       injected: [
         "QA stack",
         "Security loop",
-        "Deployment planning for local, Jetson, Azure, AWS",
+        deploymentTargets.length
+          ? `Deployment planning for ${deploymentSummary}`
+          : "Deployment planning only when required",
         "Observability baseline",
         "Release readiness gate",
       ],

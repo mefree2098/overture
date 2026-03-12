@@ -10,9 +10,7 @@ const settingsPatchSchema = z.object({
   executionModel: z.string().max(120).nullable().optional(),
   plannerReasoningEffort: z.enum(["low", "medium", "high", "xhigh"]).optional(),
   executionReasoningEffort: z.enum(["low", "medium", "high", "xhigh"]).optional(),
-  defaultResearchProvider: z
-    .enum(["codex_native", "openai_responses", "tavily_mcp", "brave_mcp"])
-    .optional(),
+  defaultResearchProvider: z.enum(["codex_native", "openai_responses"]).optional(),
   defaultExecutionMode: z.enum(["local_chatgpt", "hosted_api"]).optional(),
   defaultRepoSource: z.string().min(1).max(500).optional(),
   defaultQaStrictness: z.number().int().min(1).max(5).optional(),

@@ -62,14 +62,35 @@ function readEnvFile(repoRoot: string, fileName: string) {
   }
 }
 
-function findXcodeProject(repoRoot: string) {
-  for (const entry of readdirSync(repoRoot)) {
-    if (entry.endsWith(".xcworkspace") || entry.endsWith(".xcodeproj")) {
-      return entry;
-    }
+function findXcodeContainer(repoRoot: string) {
+  const entries = readdirSync(repoRoot);
+  const workspace = entries.find((entry) => entry.endsWith(".xcworkspace"));
+
+  if (workspace) {
+    return {
+      kind: "workspace" as const,
+      path: workspace,
+    };
   }
 
-  return null;
+  const project = entries.find((entry) => entry.endsWith(".xcodeproj"));
+
+  if (!project) {
+    return null;
+  }
+
+  return {
+    kind: "project" as const,
+    path: project,
+  };
+}
+
+function xcodebuildContainerArgs(container: { kind: "workspace" | "project"; path: string }) {
+  if (container.kind === "workspace") {
+    return `-workspace ${JSON.stringify(container.path)}`;
+  }
+
+  return `-project ${JSON.stringify(container.path)}`;
 }
 
 export function detectOperationalProfiles(project: ProjectRecord) {
@@ -82,7 +103,8 @@ export function detectOperationalProfiles(project: ProjectRecord) {
     ...readEnvFile(repoRoot, ".env"),
     ...readEnvFile(repoRoot, ".env.example"),
   };
-  const xcodeProject = existsSync(repoRoot) ? findXcodeProject(repoRoot) : null;
+  const xcodeContainer = existsSync(repoRoot) ? findXcodeContainer(repoRoot) : null;
+  const deployScriptExists = existsSync(path.join(repoRoot, "deploy.sh"));
   const launchProfiles: DraftLaunchProfile[] = [];
   const deployProfiles: DraftDeployProfile[] = [];
   const scripts = packageJson?.scripts ?? {};
@@ -141,22 +163,24 @@ export function detectOperationalProfiles(project: ProjectRecord) {
     });
   }
 
-  if (xcodeProject) {
+  if (xcodeContainer) {
+    const scheme = path.basename(xcodeContainer.path, path.extname(xcodeContainer.path));
     launchProfiles.push({
       target: "ios_simulator",
       label: "iOS Simulator",
-      command: `xcodebuild -project ${JSON.stringify(xcodeProject)} -scheme ${JSON.stringify(
-        path.basename(xcodeProject, path.extname(xcodeProject)),
+      command: `xcodebuild ${xcodebuildContainerArgs(xcodeContainer)} -scheme ${JSON.stringify(
+        scheme,
       )} -destination 'platform=iOS Simulator,name=iPhone 16' build`,
       cwd: repoRoot,
       healthcheckUrl: null,
       metadata: {
-        xcodeProject,
+        xcodeContainer: xcodeContainer.path,
+        xcodeContainerKind: xcodeContainer.kind,
       },
     });
   }
 
-  if (existsSync(path.join(repoRoot, "deploy.sh"))) {
+  if (deployScriptExists) {
     deployProfiles.push({
       target: "local",
       label: "Local container release",
@@ -196,7 +220,7 @@ export function detectOperationalProfiles(project: ProjectRecord) {
   ];
 
   for (const [target, relativePath, label] of targetFiles) {
-    if (!existsSync(path.join(repoRoot, relativePath))) {
+    if (!deployScriptExists || !existsSync(path.join(repoRoot, relativePath))) {
       continue;
     }
 
@@ -212,25 +236,27 @@ export function detectOperationalProfiles(project: ProjectRecord) {
     });
   }
 
-  if (xcodeProject) {
+  if (xcodeContainer) {
     deployProfiles.push({
       target: "ios_testflight",
       label: "iOS TestFlight upload",
-      command: `xcodebuild -project ${JSON.stringify(xcodeProject)} archive`,
+      command: `xcodebuild ${xcodebuildContainerArgs(xcodeContainer)} archive`,
       cwd: repoRoot,
       approvalRequired: true,
       metadata: {
-        xcodeProject,
+        xcodeContainer: xcodeContainer.path,
+        xcodeContainerKind: xcodeContainer.kind,
       },
     });
     deployProfiles.push({
       target: "ios_app_store",
       label: "iOS App Store submission prep",
-      command: `xcodebuild -project ${JSON.stringify(xcodeProject)} archive`,
+      command: `xcodebuild ${xcodebuildContainerArgs(xcodeContainer)} archive`,
       cwd: repoRoot,
       approvalRequired: true,
       metadata: {
-        xcodeProject,
+        xcodeContainer: xcodeContainer.path,
+        xcodeContainerKind: xcodeContainer.kind,
       },
     });
   }

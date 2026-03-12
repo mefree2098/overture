@@ -269,10 +269,6 @@ export async function runResearchProvider(input: {
         project: input.project,
         prompt: input.prompt,
       });
-    case "tavily_mcp":
-      throw new Error("tavily_mcp research is not configured in this deployment.");
-    case "brave_mcp":
-      throw new Error("brave_mcp research is not configured in this deployment.");
     default:
       return runCodexNativeResearch({
         project: input.project,
