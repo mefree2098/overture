@@ -90,6 +90,12 @@ describe("deploy runner failure evidence", () => {
 
   it("accepts a healthcheck URL emitted by the deployment command output", async () => {
     const completeDeployRunRecord = vi.fn();
+    const spawnSync = vi.fn(() => ({
+      stdout: "OVERTURE_HEALTHCHECK_URL=http://127.0.0.1:4123/api/health\n",
+      stderr: "",
+      status: 0,
+      error: undefined,
+    }));
 
     vi.stubGlobal(
       "fetch",
@@ -100,12 +106,7 @@ describe("deploy runner failure evidence", () => {
     );
 
     vi.doMock("node:child_process", () => ({
-      spawnSync: vi.fn(() => ({
-        stdout: "OVERTURE_HEALTHCHECK_URL=http://127.0.0.1:4123/api/health\n",
-        stderr: "",
-        status: 0,
-        error: undefined,
-      })),
+      spawnSync,
     }));
 
     vi.doMock("@/lib/server/repository", () => ({
@@ -154,5 +155,125 @@ describe("deploy runner failure evidence", () => {
         }),
       }),
     );
+    expect(spawnSync).toHaveBeenCalledWith(
+      "/bin/sh",
+      ["-lc", "bash deploy.sh azure"],
+      expect.objectContaining({
+        timeout: 60 * 60_000,
+        env: expect.not.objectContaining({
+          PORT: expect.any(String),
+        }),
+      }),
+    );
+  });
+
+  it("prefers a deployment-emitted healthcheck URL over the profile metadata hint", async () => {
+    const completeDeployRunRecord = vi.fn();
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string | URL | Request) => ({
+        ok: true,
+        status: String(url).includes("4123") ? 200 : 503,
+      })),
+    );
+
+    vi.doMock("node:child_process", () => ({
+      spawnSync: vi.fn(() => ({
+        stdout: "OVERTURE_HEALTHCHECK_URL=http://127.0.0.1:4123/api/health\n",
+        stderr: "",
+        status: 0,
+        error: undefined,
+      })),
+    }));
+
+    vi.doMock("@/lib/server/repository", () => ({
+      refreshOperationalProfiles: vi.fn(),
+      getProjectSnapshot: vi.fn(() => ({
+        project: {
+          id: "project-1",
+          slug: "project-slug",
+          name: "Project",
+        },
+        deployProfiles: [
+          {
+            id: "deploy-local",
+            target: "local",
+            label: "Local deploy",
+            command: "bash deploy.sh local",
+            cwd: runtimeRoot,
+            approvalRequired: false,
+            metadata: {
+              healthcheckUrl: "http://127.0.0.1:4150/api/health",
+            },
+          },
+        ],
+      })),
+      createDeployRunRecord: vi.fn(() => "deploy-run-3"),
+      completeDeployRunRecord,
+      failDeployRunRecord: vi.fn(),
+      writeArtifact: vi.fn(),
+    }));
+
+    const { runProjectDeployment } = await import("@/lib/server/deploy-runner");
+
+    await expect(
+      runProjectDeployment({
+        projectId: "project-1",
+        deployProfileId: "deploy-local",
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        deployRunId: "deploy-run-3",
+      }),
+    );
+
+    expect(completeDeployRunRecord).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          healthcheckUrl: "http://127.0.0.1:4123/api/health",
+        }),
+      }),
+    );
+  });
+
+  it("rejects deployment profiles that are currently missing local prerequisites", async () => {
+    vi.doMock("@/lib/server/repository", () => ({
+      refreshOperationalProfiles: vi.fn(),
+      getProjectSnapshot: vi.fn(() => ({
+        project: {
+          id: "project-1",
+          slug: "project-slug",
+          name: "Project",
+        },
+        deployProfiles: [
+          {
+            id: "deploy-cloud",
+            target: "aws",
+            label: "AWS deploy",
+            command: "bash deploy.sh aws",
+            cwd: runtimeRoot,
+            approvalRequired: true,
+            metadata: {
+              unavailableReason: "AWS CLI (`aws`) was not found on PATH.",
+            },
+          },
+        ],
+      })),
+      createDeployRunRecord: vi.fn(),
+      completeDeployRunRecord: vi.fn(),
+      failDeployRunRecord: vi.fn(),
+      writeArtifact: vi.fn(),
+    }));
+
+    const { runProjectDeployment } = await import("@/lib/server/deploy-runner");
+
+    await expect(
+      runProjectDeployment({
+        projectId: "project-1",
+        deployProfileId: "deploy-cloud",
+        confirmed: true,
+      }),
+    ).rejects.toThrow("AWS CLI (`aws`) was not found on PATH.");
   });
 });

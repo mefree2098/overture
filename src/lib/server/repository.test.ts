@@ -1,7 +1,12 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { SpecIR } from "@/lib/types";
+
+function makeExecutable(filePath: string) {
+  writeFileSync(filePath, "#!/bin/sh\nexit 0\n", "utf8");
+  chmodSync(filePath, 0o755);
+}
 
 const SPEC_IR: SpecIR = {
   summary:
@@ -47,7 +52,21 @@ describe("repository lifecycle", () => {
     const dbPath = path.join(runtimeRoot, "db", "overture.test.db");
     process.env.OVERTURE_ROOT = runtimeRoot;
     process.env.OVERTURE_DB_PATH = dbPath;
+    process.env.CODEX_HOME = path.join(runtimeRoot, "codex-home");
+    process.env.OVERTURE_CODEX_BIN = path.join(runtimeRoot, "bin", "codex");
     mkdirSync(path.dirname(dbPath), { recursive: true });
+    mkdirSync(process.env.CODEX_HOME, { recursive: true });
+    mkdirSync(path.dirname(process.env.OVERTURE_CODEX_BIN), { recursive: true });
+    makeExecutable(process.env.OVERTURE_CODEX_BIN);
+    writeFileSync(
+      path.join(process.env.CODEX_HOME, "auth.json"),
+      JSON.stringify({
+        tokens: {
+          access_token: "test-access-token",
+        },
+      }),
+      "utf8",
+    );
 
     vi.doMock("@/lib/server/llm-planner", () => ({
       buildSpecIrWithLlm: vi.fn(async (input: { name: string }) => ({
@@ -135,6 +154,18 @@ describe("repository lifecycle", () => {
     ).toThrow("OpenAI Responses research requires OPENAI_API_KEY.");
   });
 
+  it("rejects explicitly unsupported execution modes", async () => {
+    const repository = await import("@/lib/server/repository");
+
+    expect(() =>
+      repository.createDraftProject({
+        name: "Unavailable Mode",
+        repoSource: ".",
+        executionMode: "hosted_api",
+      }),
+    ).toThrow("Hosted API execution mode requires OPENAI_API_KEY or Codex API auth.");
+  });
+
   it("updates a project's stored name without changing its slug", async () => {
     const repository = await import("@/lib/server/repository");
 
@@ -159,6 +190,7 @@ describe("repository lifecycle", () => {
 
   it("updates an existing project's captured execution settings", async () => {
     const repository = await import("@/lib/server/repository");
+    process.env.OPENAI_API_KEY = "sk-live-test";
 
     const created = await repository.createProjectFromSpec({
       name: "Settings Project",

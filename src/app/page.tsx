@@ -6,15 +6,22 @@ import { ProjectCard } from "@/components/project-card";
 import { ProjectCreateForm } from "@/components/project-create-form";
 import { codexReasoningEffortLabel } from "@/lib/codex-reasoning";
 import { getCodexModelOptions } from "@/lib/model-catalog";
+import {
+  executionModeLabel,
+  resolvePreferredExecutionMode,
+  runtimeAccountStatusLabel,
+  runtimeReady,
+} from "@/lib/runtime-support";
 import { preferredResearchProvider } from "@/lib/research-provider-catalog";
 import { deploymentTargetLabel, researchProviderLabel } from "@/lib/project-pipeline";
-import { getAppSettings } from "@/lib/server/app-settings";
+import { getAppSettings, getExecutionModeEnvOverride } from "@/lib/server/app-settings";
 import { listProjects } from "@/lib/server/repository";
 import { getExecutionModeSupport } from "@/lib/server/runtime-config";
 
 export default function HomePage() {
   const projects = listProjects();
   const appSettings = getAppSettings();
+  const executionModeOverride = getExecutionModeEnvOverride();
   const executionSupport = getExecutionModeSupport();
   const modelOptions = getCodexModelOptions([
     appSettings.plannerModel,
@@ -24,6 +31,19 @@ export default function HomePage() {
     appSettings.defaultResearchProvider,
     executionSupport.researchProviderAvailability,
   );
+  const effectiveDefaultExecutionMode = resolvePreferredExecutionMode(
+    appSettings.defaultExecutionMode,
+    executionSupport,
+  );
+  const runtimeIsReady = runtimeReady(executionSupport);
+  const executionModeNote =
+    effectiveDefaultExecutionMode === appSettings.defaultExecutionMode
+      ? executionModeOverride
+        ? "Managed by OVERTURE_DEFAULT_EXECUTION_MODE."
+        : null
+      : executionModeOverride
+        ? `OVERTURE_DEFAULT_EXECUTION_MODE requests ${executionModeLabel(appSettings.defaultExecutionMode)}, but this machine currently falls back to ${executionModeLabel(effectiveDefaultExecutionMode)}.`
+        : `Saved default ${executionModeLabel(appSettings.defaultExecutionMode)} is unavailable on this machine, so new projects fall back to ${executionModeLabel(effectiveDefaultExecutionMode)}.`;
   const projectSummary = {
     projects: projects.length,
     inProgress: projects.filter(
@@ -95,11 +115,14 @@ export default function HomePage() {
                   Before you begin
                 </p>
                 <h2 className="text-2xl font-semibold text-[var(--color-ink)]">
-                  Overture is ready to plan and run projects
+                  {runtimeIsReady
+                    ? "Overture is ready to plan and run projects"
+                    : "Finish runtime setup before starting projects"}
                 </h2>
                 <p className="text-sm leading-7 text-[var(--color-muted)]">
-                  If you want to change the model, run mode, or project defaults, use Settings.
-                  Otherwise you can stay on this page and start right away.
+                  {runtimeIsReady
+                    ? "If you want to change the model, run mode, or project defaults, use Settings. Otherwise you can stay on this page and start right away."
+                    : "Overture still needs a working Codex CLI plus a usable auth path before project creation can start cleanly."}
                 </p>
               </div>
             </div>
@@ -150,10 +173,13 @@ export default function HomePage() {
                   Default run mode
                 </p>
                 <p className="mt-2 text-base text-[var(--color-ink)]">
-                  {appSettings.defaultExecutionMode === "local_chatgpt"
-                    ? "Local ChatGPT Codex"
-                    : "Hosted API Codex"}
+                  {executionModeLabel(effectiveDefaultExecutionMode)}
                 </p>
+                {executionModeNote ? (
+                  <p className="mt-2 text-xs leading-6 text-[var(--color-muted)]">
+                    {executionModeNote}
+                  </p>
+                ) : null}
               </div>
               <div className="rounded-[24px] border border-white/8 bg-white/4 p-4">
                 <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--color-muted)]">
@@ -168,11 +194,7 @@ export default function HomePage() {
                   Account status
                 </p>
                 <p className="mt-2 text-base text-[var(--color-ink)]">
-                  {executionSupport.localChatgptAvailable
-                    ? "Your ChatGPT Codex login is ready"
-                    : executionSupport.hostedApiAvailable
-                      ? "Hosted API mode is ready"
-                      : "A Codex login is still needed"}
+                  {runtimeAccountStatusLabel(executionSupport)}
                 </p>
               </div>
             </div>

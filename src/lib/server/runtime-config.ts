@@ -151,15 +151,35 @@ export function resolveAvailableResearchProvider(provider: "codex_native" | "ope
   return preferredResearchProvider(provider, getResearchProviderAvailability());
 }
 
-export function assertResearchProviderAvailable(
-  provider: "codex_native" | "openai_responses",
-) {
-  if (provider === "codex_native") {
+export function assertExecutionModeAvailable(mode: ExecutionMode) {
+  const support = getExecutionModeSupport();
+
+  if (mode === "hosted_api") {
+    if (support.hostedApiAvailable) {
+      return;
+    }
+
+    throw new Error("Hosted API execution mode requires OPENAI_API_KEY or Codex API auth.");
+  }
+
+  if (support.localChatgptAvailable) {
     return;
   }
 
+  throw new Error("Local ChatGPT execution mode requires a ChatGPT-authenticated Codex login.");
+}
+
+export function assertResearchProviderAvailable(
+  provider: "codex_native" | "openai_responses",
+) {
   if (isResearchProviderAvailable(provider, getResearchProviderAvailability())) {
     return;
+  }
+
+  if (provider === "codex_native") {
+    throw new Error(
+      "Codex native research requires Codex CLI plus a usable ChatGPT or API-key Codex login.",
+    );
   }
 
   throw new Error("OpenAI Responses research requires OPENAI_API_KEY.");

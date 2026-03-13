@@ -7,6 +7,7 @@ import {
   createLaunchRunRecord,
   failLaunchRunRecord,
   getProjectSnapshot,
+  markLaunchRunProcessStopped,
   refreshOperationalProfiles,
   writeArtifact,
 } from "@/lib/server/repository";
@@ -145,7 +146,7 @@ function composeDiagnostics(profile: {
     return null;
   }
 
-  const result = spawnSync("sh", ["-lc", "docker compose ps && printf '\\n---\\n\\n' && docker compose logs --tail=200"], {
+  const result = spawnSync("/bin/sh", ["-lc", "docker compose ps && printf '\\n---\\n\\n' && docker compose logs --tail=200"], {
     cwd: profile.cwd,
     env: {
       ...process.env,
@@ -199,6 +200,133 @@ function killDetachedProcess(pid: number | null | undefined) {
       // ignore cleanup failures
     }
   }
+}
+
+function processIsRunning(pid: number | null | undefined) {
+  if (!pid) {
+    return false;
+  }
+
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function launchProcessPid(metadata: Record<string, unknown>) {
+  const pid = Number(metadata.pid);
+  return Number.isInteger(pid) && pid > 0 ? pid : null;
+}
+
+function launchProcessStopped(metadata: Record<string, unknown>) {
+  return typeof metadata.processStoppedAt === "string" && metadata.processStoppedAt.trim().length > 0;
+}
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function recordStoppedLaunchProcess(input: {
+  projectId: string;
+  launchRunId: string;
+  summary: string;
+  metadata: Record<string, unknown>;
+}) {
+  markLaunchRunProcessStopped({
+    launchRunId: input.launchRunId,
+    projectId: input.projectId,
+    summary: input.summary,
+    metadata: {
+      ...input.metadata,
+      processStoppedAt: nowIso(),
+    },
+  });
+}
+
+function stopPriorLaunchProcesses(input: {
+  projectId: string;
+  currentLaunchRunId: string;
+  launchRuns: Array<{
+    id: string;
+    launchProfileId: string;
+    metadata: Record<string, unknown>;
+  }>;
+  launchProfileId: string;
+}) {
+  for (const run of input.launchRuns) {
+    if (run.launchProfileId !== input.launchProfileId || run.id === input.currentLaunchRunId) {
+      continue;
+    }
+
+    const pid = launchProcessPid(run.metadata);
+    if (!pid || launchProcessStopped(run.metadata) || !processIsRunning(pid)) {
+      continue;
+    }
+
+    killDetachedProcess(pid);
+    recordStoppedLaunchProcess({
+      projectId: input.projectId,
+      launchRunId: run.id,
+      summary: "Stopped the earlier launch process before starting a fresh run.",
+      metadata: {
+        ...run.metadata,
+        supersededByLaunchRunId: input.currentLaunchRunId,
+      },
+    });
+  }
+}
+
+export async function stopProjectLaunchProcess(input: {
+  projectId: string;
+  launchRunId: string;
+}) {
+  refreshOperationalProfiles(input.projectId);
+  const snapshot = getProjectSnapshot(input.projectId);
+
+  if (!snapshot) {
+    throw new Error("Project not found.");
+  }
+
+  const run = snapshot.launchRuns.find((candidate) => candidate.id === input.launchRunId);
+
+  if (!run) {
+    throw new Error("Launch run not found.");
+  }
+
+  const pid = launchProcessPid(run.metadata);
+
+  if (!pid) {
+    throw new Error("This launch run does not have a managed process to stop.");
+  }
+
+  if (launchProcessStopped(run.metadata) || !processIsRunning(pid)) {
+    recordStoppedLaunchProcess({
+      projectId: snapshot.project.id,
+      launchRunId: run.id,
+      summary: "Launch process was already stopped.",
+      metadata: run.metadata,
+    });
+
+    return {
+      launchRunId: run.id,
+      summary: "Launch process was already stopped.",
+    };
+  }
+
+  killDetachedProcess(pid);
+  recordStoppedLaunchProcess({
+    projectId: snapshot.project.id,
+    launchRunId: run.id,
+    summary: "Stopped the managed launch process.",
+    metadata: run.metadata,
+  });
+
+  return {
+    launchRunId: run.id,
+    summary: "Stopped the managed launch process.",
+  };
 }
 
 export async function runProjectLaunch(input: {
@@ -262,9 +390,16 @@ export async function runProjectLaunch(input: {
     let pid: number | null = null;
 
     if (profile.target === "web" || profile.target === "api") {
+      stopPriorLaunchProcesses({
+        projectId: snapshot.project.id,
+        currentLaunchRunId: persistedRunId,
+        launchRuns: snapshot.launchRuns,
+        launchProfileId: profile.id,
+      });
+
       const stdoutFd = openSync(logPath, "a");
       const port = managedPort(snapshot.project.slug);
-      const child = spawn("sh", ["-lc", profile.command], {
+      const child = spawn("/bin/sh", ["-lc", profile.command], {
         cwd: profile.cwd,
         env: {
           ...process.env,
@@ -300,7 +435,7 @@ export async function runProjectLaunch(input: {
       summary = `Launched ${profile.label} and verified ${outcome.health?.url}.`;
     } else {
       const port = managedPort(snapshot.project.slug, 1);
-      const result = spawnSync("sh", ["-lc", profile.command], {
+      const result = spawnSync("/bin/sh", ["-lc", profile.command], {
         cwd: profile.cwd,
         env: {
           ...process.env,

@@ -1,7 +1,7 @@
 import { buildOperationalProofRows } from "@/lib/operational-proof";
 
 describe("operational proof rows", () => {
-  it("builds rows from real targets, profiles, and run history", () => {
+  it("keeps the proof matrix scoped to the project's selected deployment targets", () => {
     const timestamp = new Date("2026-03-12T12:00:00.000Z").toISOString();
     const rows = buildOperationalProofRows({
       projectDeploymentTargets: ["local", "aws"],
@@ -44,6 +44,18 @@ describe("operational proof rows", () => {
           metadata: {
             healthcheckUrl: "http://host.docker.internal:3000/api/health",
           },
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        },
+        {
+          id: "deploy-azure",
+          projectId: "project-1",
+          target: "azure",
+          label: "Azure deploy",
+          command: "bash deploy.sh azure",
+          cwd: "/repo",
+          approvalRequired: true,
+          metadata: {},
           createdAt: timestamp,
           updatedAt: timestamp,
         },

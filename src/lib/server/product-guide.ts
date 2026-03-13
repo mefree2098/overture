@@ -316,9 +316,12 @@ export function buildProjectProductGuide(input: {
       sourceIsRemote,
       usePrimaryWorkspace,
     }),
-    detail: profile.approvalRequired
-      ? `Publishes to ${profile.target}. Operator confirmation is required.`
-      : `Publishes to ${profile.target}.`,
+    detail:
+      typeof profile.metadata.unavailableReason === "string"
+        ? `Publishes to ${profile.target}. Local prerequisites are still missing: ${profile.metadata.unavailableReason}`
+        : profile.approvalRequired
+          ? `Publishes to ${profile.target}. Operator confirmation is required.`
+          : `Publishes to ${profile.target}.`,
     category: "publish" as const,
   }));
   const testCommands = selectTestCommands(inspectionRoot);

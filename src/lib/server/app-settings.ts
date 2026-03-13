@@ -1,7 +1,10 @@
 import { DEFAULT_APP_SETTINGS } from "@/lib/constants";
 import { normalizeCodexReasoningEffort } from "@/lib/codex-reasoning";
 import { normalizeDeploymentTargets, normalizeResearchProvider } from "@/lib/project-pipeline";
-import { assertResearchProviderAvailable } from "@/lib/server/runtime-config";
+import {
+  assertExecutionModeAvailable,
+  assertResearchProviderAvailable,
+} from "@/lib/server/runtime-config";
 import { getDb } from "@/lib/server/db";
 import type { AppSettingsRecord, ExecutionMode } from "@/lib/types";
 
@@ -43,6 +46,10 @@ function parseDeploymentTargets(value: unknown) {
 function envOverrideExecutionMode() {
   const configured = process.env.OVERTURE_DEFAULT_EXECUTION_MODE?.trim();
   return configured ? normalizeExecutionMode(configured) : null;
+}
+
+export function getExecutionModeEnvOverride() {
+  return envOverrideExecutionMode();
 }
 
 function hydrateSettings(row: Record<string, unknown>): AppSettingsRecord {
@@ -221,6 +228,10 @@ export function updateAppSettings(
       80,
     ),
   } satisfies Omit<AppSettingsRecord, "createdAt" | "updatedAt" | "defaults">;
+
+  if (updates.defaultExecutionMode !== undefined) {
+    assertExecutionModeAvailable(next.defaultExecutionMode);
+  }
 
   if (updates.defaultResearchProvider !== undefined) {
     assertResearchProviderAvailable(next.defaultResearchProvider);

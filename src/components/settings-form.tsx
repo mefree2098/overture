@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition, useEffect, useState } from "react";
+import { startTransition, useEffect, useMemo, useState } from "react";
 import {
   CodexReasoningSelect,
 } from "@/components/codex-reasoning-select";
@@ -11,7 +11,21 @@ import {
   getCodexReasoningEffortOptions,
 } from "@/lib/codex-reasoning";
 import type { CodexModelOption } from "@/lib/model-catalog";
-import { preferredResearchProvider } from "@/lib/research-provider-catalog";
+import {
+  isResearchProviderAvailable,
+  preferredResearchProvider,
+} from "@/lib/research-provider-catalog";
+import {
+  executionModeAvailable,
+  executionModeLabel,
+  resolvePreferredExecutionMode,
+  runtimeSupportLabel,
+} from "@/lib/runtime-support";
+import {
+  buildAppSettingsPatch,
+  editableAppSettingsFromRecord,
+  type EditableAppSettings,
+} from "@/lib/settings-patch";
 import { CheckCircle2, LoaderCircle, Settings2, Sparkles } from "lucide-react";
 import type {
   AppSettingsRecord,
@@ -20,40 +34,14 @@ import type {
   ResearchProvider,
 } from "@/lib/types";
 
-function supportLabel(
-  executionSupport: {
-    codexCliAvailable: boolean;
-    codexAuthMode: "chatgpt" | "apikey" | "unknown" | "none";
-    localChatgptAvailable: boolean;
-    hostedApiAvailable: boolean;
-    recommendedExecutionMode: ExecutionMode;
-    researchProviderAvailability: {
-      codexNativeAvailable: boolean;
-      openaiResponsesAvailable: boolean;
-    };
-  },
-) {
-  if (!executionSupport.codexCliAvailable) {
-    return "Codex CLI is not available yet on this machine.";
-  }
-
-  if (executionSupport.localChatgptAvailable) {
-    return "ChatGPT-backed Codex is ready for local planning and execution.";
-  }
-
-  if (executionSupport.hostedApiAvailable) {
-    return "API-key-backed Codex is available. ChatGPT auth is not detected.";
-  }
-
-  return "Codex CLI is installed, but Overture could not find a usable login yet.";
-}
-
 export function SettingsForm({
   initialSettings,
+  executionModeOverride,
   executionSupport,
   modelOptions,
 }: {
   initialSettings: AppSettingsRecord;
+  executionModeOverride: ExecutionMode | null;
   executionSupport: {
     codexCliAvailable: boolean;
     codexAuthMode: "chatgpt" | "apikey" | "unknown" | "none";
@@ -67,18 +55,17 @@ export function SettingsForm({
   };
   modelOptions: CodexModelOption[];
 }) {
+  const [baseline, setBaseline] = useState<EditableAppSettings>(
+    editableAppSettingsFromRecord(initialSettings),
+  );
   const [plannerModel, setPlannerModel] = useState(initialSettings.plannerModel ?? "");
   const [executionModel, setExecutionModel] = useState(initialSettings.executionModel ?? "");
   const [plannerReasoningEffort, setPlannerReasoningEffort] =
     useState<CodexReasoningEffort>(initialSettings.plannerReasoningEffort);
   const [executionReasoningEffort, setExecutionReasoningEffort] =
     useState<CodexReasoningEffort>(initialSettings.executionReasoningEffort);
-  const [defaultResearchProvider, setDefaultResearchProvider] = useState<ResearchProvider>(
-    preferredResearchProvider(
-      initialSettings.defaultResearchProvider,
-      executionSupport.researchProviderAvailability,
-    ),
-  );
+  const [defaultResearchProvider, setDefaultResearchProvider] =
+    useState<ResearchProvider>(initialSettings.defaultResearchProvider);
   const [defaultExecutionMode, setDefaultExecutionMode] = useState<ExecutionMode>(
     initialSettings.defaultExecutionMode,
   );
@@ -105,12 +92,27 @@ export function SettingsForm({
   const [error, setError] = useState<string | null>(null);
   const plannerReasoningOptions = getCodexReasoningEffortOptions(plannerModel);
   const executionReasoningOptions = getCodexReasoningEffortOptions(executionModel);
-
-  useEffect(() => {
-    setDefaultResearchProvider((current) =>
-      preferredResearchProvider(current, executionSupport.researchProviderAvailability),
-    );
-  }, [executionSupport.researchProviderAvailability]);
+  const executionModeLocked = Boolean(executionModeOverride);
+  const selectedResearchProviderAvailable = isResearchProviderAvailable(
+    defaultResearchProvider,
+    executionSupport.researchProviderAvailability,
+  );
+  const effectiveResearchProvider = useMemo(
+    () =>
+      preferredResearchProvider(
+        defaultResearchProvider,
+        executionSupport.researchProviderAvailability,
+      ),
+    [defaultResearchProvider, executionSupport.researchProviderAvailability],
+  );
+  const selectedExecutionModeAvailable = executionModeAvailable(
+    defaultExecutionMode,
+    executionSupport,
+  );
+  const effectiveExecutionMode = useMemo(
+    () => resolvePreferredExecutionMode(defaultExecutionMode, executionSupport),
+    [defaultExecutionMode, executionSupport],
+  );
 
   useEffect(() => {
     if (
@@ -151,12 +153,9 @@ export function SettingsForm({
 
     startTransition(async () => {
       try {
-        const response = await fetch("/api/settings", {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
+        const patch = buildAppSettingsPatch({
+          baseline,
+          current: {
             plannerModel: plannerModel.trim() || null,
             executionModel: executionModel.trim() || null,
             plannerReasoningEffort,
@@ -169,17 +168,32 @@ export function SettingsForm({
             defaultDeploymentTargets,
             symphonyMaxConcurrentAgents,
             symphonyMaxTurns,
-          }),
+          },
+          executionModeLocked,
         });
-        const payload = (await response.json()) as {
+
+        if (!Object.keys(patch).length) {
+          setSavedMessage("Settings already match the current defaults.");
+          setSaving(false);
+          return;
+        }
+
+        const response = await fetch("/api/settings", {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(patch),
+        });
+        const payload = (await response.json()) as AppSettingsRecord & {
           error?: string;
-          updatedAt?: string;
         };
 
         if (!response.ok) {
           throw new Error(payload.error ?? "Unable to save settings.");
         }
 
+        setBaseline(editableAppSettingsFromRecord(payload));
         setSavedMessage("Settings saved. New projects will use these defaults.");
       } catch (saveError) {
         setError(saveError instanceof Error ? saveError.message : "Unable to save settings.");
@@ -289,6 +303,25 @@ export function SettingsForm({
                 availability={executionSupport.researchProviderAvailability}
                 onChange={setDefaultResearchProvider}
               />
+              {!selectedResearchProviderAvailable ? (
+                <p className="text-xs leading-6 text-[var(--color-muted)]">
+                  {effectiveResearchProvider !== defaultResearchProvider
+                    ? `This saved default is not currently available. New projects use ${
+                        effectiveResearchProvider === "openai_responses"
+                          ? "OpenAI Responses"
+                          : "Codex native"
+                      } until ${
+                        defaultResearchProvider === "openai_responses"
+                          ? "OpenAI Responses"
+                          : "Codex native"
+                      } becomes available again.`
+                    : `This saved default is not currently available. Guided research stays blocked until ${
+                        defaultResearchProvider === "openai_responses"
+                          ? "OpenAI Responses"
+                          : "Codex native"
+                      } becomes available on this machine.`}
+                </p>
+              ) : null}
             </label>
 
             <label className="space-y-2">
@@ -304,6 +337,7 @@ export function SettingsForm({
                 onChange={(event) =>
                   setDefaultExecutionMode(event.target.value as ExecutionMode)
                 }
+                disabled={executionModeLocked}
                 className="glass-input w-full rounded-[22px] px-4 py-3"
               >
                 <option
@@ -316,6 +350,21 @@ export function SettingsForm({
                   Hosted API Codex
                 </option>
               </select>
+              {executionModeLocked ? (
+                <p className="text-xs leading-6 text-[var(--color-muted)]">
+                  Managed by `OVERTURE_DEFAULT_EXECUTION_MODE`. Change that environment variable to
+                  update the platform default.
+                  {!selectedExecutionModeAvailable
+                    ? ` New projects on this machine currently fall back to ${executionModeLabel(effectiveExecutionMode)} until ${executionModeLabel(defaultExecutionMode)} becomes available.`
+                    : ""}
+                </p>
+              ) : !selectedExecutionModeAvailable ? (
+                <p className="text-xs leading-6 text-[var(--color-muted)]">
+                  This saved default is not currently available. New projects use{" "}
+                  {executionModeLabel(effectiveExecutionMode)} until{" "}
+                  {executionModeLabel(defaultExecutionMode)} becomes available again.
+                </p>
+              ) : null}
             </label>
 
             <label className="space-y-2 lg:col-span-2">
@@ -457,7 +506,7 @@ export function SettingsForm({
                 Current runtime status
               </h2>
               <p className="text-sm leading-7 text-[var(--color-muted)]">
-                {supportLabel(executionSupport)}
+                {runtimeSupportLabel(executionSupport)}
               </p>
             </div>
           </div>

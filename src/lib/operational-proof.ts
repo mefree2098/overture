@@ -45,6 +45,10 @@ function hasDeployHealthcheck(profile: DeployProfileRecord) {
   );
 }
 
+function deployProfileIsRunnable(profile: DeployProfileRecord) {
+  return typeof profile.metadata.unavailableReason !== "string";
+}
+
 export function buildOperationalProofRows(input: {
   projectDeploymentTargets: DeploymentTarget[];
   launchProfiles: LaunchProfileRecord[];
@@ -55,14 +59,6 @@ export function buildOperationalProofRows(input: {
   const launchProfilesById = new Map(input.launchProfiles.map((profile) => [profile.id, profile]));
   const targetSet = new Set<DeploymentTarget>(input.projectDeploymentTargets);
 
-  if (input.launchProfiles.length || input.launchRuns.length) {
-    targetSet.add("local");
-  }
-
-  for (const profile of input.deployProfiles) {
-    targetSet.add(profile.target);
-  }
-
   return DEPLOYMENT_TARGETS.filter((target) => targetSet.has(target)).map((target) => {
     const configured = input.projectDeploymentTargets.includes(target);
     const targetLaunchProfiles = target === "local" ? input.launchProfiles : [];
@@ -71,6 +67,7 @@ export function buildOperationalProofRows(input: {
         ? input.launchRuns.filter((run) => launchProfilesById.has(run.launchProfileId))
         : [];
     const targetDeployProfiles = input.deployProfiles.filter((profile) => profile.target === target);
+    const runnableDeployProfiles = targetDeployProfiles.filter(deployProfileIsRunnable);
     const targetDeployProfileIds = new Set(targetDeployProfiles.map((profile) => profile.id));
     const targetDeployRuns = input.deployRuns.filter((run) =>
       targetDeployProfileIds.has(run.deployProfileId),
@@ -84,7 +81,7 @@ export function buildOperationalProofRows(input: {
     const deployHealthRuns = hasDeployHealthcheckProfile ? targetDeployRuns : [];
     const latestHealthRun = latestRun([...launchHealthRuns, ...deployHealthRuns]);
     const profiles =
-      targetLaunchProfiles.length || targetDeployProfiles.length
+      targetLaunchProfiles.length || runnableDeployProfiles.length
         ? "pass"
         : configured
           ? "partial"

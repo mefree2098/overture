@@ -1,6 +1,11 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+
+function makeExecutable(filePath: string) {
+  writeFileSync(filePath, "#!/bin/sh\nexit 0\n", "utf8");
+  chmodSync(filePath, 0o755);
+}
 
 describe("app settings", () => {
   const originalEnv = { ...process.env };
@@ -12,7 +17,21 @@ describe("app settings", () => {
     const dbPath = path.join(runtimeRoot, "db", "overture.test.db");
     process.env.OVERTURE_ROOT = runtimeRoot;
     process.env.OVERTURE_DB_PATH = dbPath;
+    process.env.CODEX_HOME = path.join(runtimeRoot, "codex-home");
+    process.env.OVERTURE_CODEX_BIN = path.join(runtimeRoot, "bin", "codex");
     mkdirSync(path.dirname(dbPath), { recursive: true });
+    mkdirSync(process.env.CODEX_HOME, { recursive: true });
+    mkdirSync(path.dirname(process.env.OVERTURE_CODEX_BIN), { recursive: true });
+    makeExecutable(process.env.OVERTURE_CODEX_BIN);
+    writeFileSync(
+      path.join(process.env.CODEX_HOME, "auth.json"),
+      JSON.stringify({
+        tokens: {
+          access_token: "test-access-token",
+        },
+      }),
+      "utf8",
+    );
   });
 
   afterEach(() => {
@@ -23,6 +42,7 @@ describe("app settings", () => {
   });
 
   it("creates a default settings row and persists updates", async () => {
+    process.env.OPENAI_API_KEY = "sk-live-test";
     const settingsModule = await import("@/lib/server/app-settings");
 
     const defaults = settingsModule.getAppSettings();
@@ -69,6 +89,16 @@ describe("app settings", () => {
         defaultResearchProvider: "openai_responses",
       }),
     ).toThrow("OpenAI Responses research requires OPENAI_API_KEY.");
+  });
+
+  it("rejects unsupported execution modes for the current environment", async () => {
+    const settingsModule = await import("@/lib/server/app-settings");
+
+    expect(() =>
+      settingsModule.updateAppSettings({
+        defaultExecutionMode: "hosted_api",
+      }),
+    ).toThrow("Hosted API execution mode requires OPENAI_API_KEY or Codex API auth.");
   });
 
   it("honors an execution-mode environment override when reading settings", async () => {

@@ -44,15 +44,6 @@ function deploymentHealthUrl(input: {
   metadata?: Record<string, unknown>;
   commandOutput?: string;
 }) {
-  const configured =
-    typeof input.metadata?.healthcheckUrl === "string"
-      ? input.metadata.healthcheckUrl
-      : null;
-
-  if (configured) {
-    return configured;
-  }
-
   if (input.commandOutput) {
     const lines = input.commandOutput.split(/\r?\n/);
 
@@ -83,11 +74,55 @@ function deploymentHealthUrl(input: {
     }
   }
 
+  const configured =
+    typeof input.metadata?.healthcheckUrl === "string"
+      ? input.metadata.healthcheckUrl
+      : null;
+
+  if (configured) {
+    return configured;
+  }
+
   switch (input.target) {
     case "local":
       return "http://host.docker.internal:3000/api/health";
     default:
       return null;
+  }
+}
+
+function deployProfileUnavailableReason(profile: {
+  metadata?: Record<string, unknown>;
+}) {
+  return typeof profile.metadata?.unavailableReason === "string"
+    ? profile.metadata.unavailableReason
+    : null;
+}
+
+function deploymentEnvironment() {
+  const env = {
+    ...process.env,
+    FORCE_COLOR: "0",
+  };
+
+  if (env.PORT) {
+    env.OVERTURE_CONTROL_PLANE_PORT = env.PORT;
+    delete env.PORT;
+  }
+
+  return env;
+}
+
+function deploymentCommandTimeoutMs(target: string) {
+  switch (target) {
+    case "aws":
+    case "azure":
+      return 60 * 60_000;
+    case "ios_testflight":
+    case "ios_app_store":
+      return 30 * 60_000;
+    default:
+      return 15 * 60_000;
   }
 }
 
@@ -141,6 +176,11 @@ export async function runProjectDeployment(input: {
     throw new Error("This deployment target requires operator confirmation.");
   }
 
+  const unavailableReason = deployProfileUnavailableReason(profile);
+  if (unavailableReason) {
+    throw new Error(unavailableReason);
+  }
+
   const runRoot = path.join(getProjectRoot(snapshot.project.slug), "deploy");
   mkdirSync(runRoot, { recursive: true });
   const deployRunId = randomUUID();
@@ -173,17 +213,11 @@ export async function runProjectDeployment(input: {
   });
 
   try {
-    const result = spawnSync("sh", ["-lc", profile.command], {
+    const result = spawnSync("/bin/sh", ["-lc", profile.command], {
       cwd: profile.cwd,
-      env: {
-        ...process.env,
-        FORCE_COLOR: "0",
-      },
+      env: deploymentEnvironment(),
       encoding: "utf8",
-      timeout:
-        profile.target === "ios_testflight" || profile.target === "ios_app_store"
-          ? 30 * 60_000
-          : 15 * 60_000,
+      timeout: deploymentCommandTimeoutMs(profile.target),
     });
 
     writeFileSync(

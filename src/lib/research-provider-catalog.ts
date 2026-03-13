@@ -29,10 +29,12 @@ export function isResearchProviderAvailable(
   availability: ResearchProviderAvailability,
 ) {
   switch (provider) {
+    case "codex_native":
+      return availability.codexNativeAvailable;
     case "openai_responses":
       return availability.openaiResponsesAvailable;
     default:
-      return true;
+      return false;
   }
 }
 
@@ -48,5 +50,5 @@ export function preferredResearchProvider(
     return "openai_responses";
   }
 
-  return "codex_native";
+  return availability.codexNativeAvailable ? "codex_native" : provider;
 }

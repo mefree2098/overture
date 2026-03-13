@@ -19,7 +19,16 @@ import {
 } from "lucide-react";
 import type { CodexModelOption } from "@/lib/model-catalog";
 import { getCodexReasoningEffortOptions } from "@/lib/codex-reasoning";
-import { preferredResearchProvider } from "@/lib/research-provider-catalog";
+import {
+  isResearchProviderAvailable,
+  preferredResearchProvider,
+} from "@/lib/research-provider-catalog";
+import { researchProviderLabel } from "@/lib/project-pipeline";
+import {
+  executionModeAvailable,
+  executionModeLabel,
+  resolvePreferredExecutionMode,
+} from "@/lib/runtime-support";
 import { extractOutline } from "@/lib/spec-outline";
 import type {
   AppSettingsRecord,
@@ -44,22 +53,6 @@ Describe what you want built or improved.
 Paste any research notes, requirements, risks, or ideas here.`;
 
 type CreatePath = "guided" | "quick";
-
-function modeIsAvailable(
-  mode: ExecutionMode,
-  executionSupport: {
-    localChatgptAvailable: boolean;
-    hostedApiAvailable: boolean;
-  },
-) {
-  return mode === "local_chatgpt"
-    ? executionSupport.localChatgptAvailable
-    : executionSupport.hostedApiAvailable;
-}
-
-function modeLabel(mode: ExecutionMode) {
-  return mode === "local_chatgpt" ? "Local ChatGPT Codex" : "Hosted API Codex";
-}
 
 function searchModeLabel(mode: WorkshopSearchMode) {
   switch (mode) {
@@ -90,13 +83,22 @@ export function ProjectCreateForm({
   modelOptions: CodexModelOption[];
 }) {
   const router = useRouter();
-  const initialExecutionMode = useMemo(() => {
-    if (modeIsAvailable(appSettings.defaultExecutionMode, executionSupport)) {
-      return appSettings.defaultExecutionMode;
-    }
-
-    return executionSupport.recommendedExecutionMode;
-  }, [appSettings.defaultExecutionMode, executionSupport]);
+  const initialExecutionMode = useMemo(
+    () => resolvePreferredExecutionMode(appSettings.defaultExecutionMode, executionSupport),
+    [appSettings.defaultExecutionMode, executionSupport],
+  );
+  const savedDefaultResearchProvider = useMemo(
+    () =>
+      preferredResearchProvider(
+        appSettings.defaultResearchProvider,
+        executionSupport.researchProviderAvailability,
+      ),
+    [appSettings.defaultResearchProvider, executionSupport.researchProviderAvailability],
+  );
+  const storedDefaultResearchProviderAvailable = isResearchProviderAvailable(
+    appSettings.defaultResearchProvider,
+    executionSupport.researchProviderAvailability,
+  );
   const [name, setName] = useState("");
   const [createPath, setCreatePath] = useState<CreatePath>("guided");
   const [repoSource, setRepoSource] = useState(
@@ -781,9 +783,7 @@ export function ProjectCreateForm({
                 submitting ||
                 !name.trim() ||
                 !executionSupport.codexCliAvailable ||
-                (executionMode === "local_chatgpt" &&
-                  !executionSupport.localChatgptAvailable) ||
-                (executionMode === "hosted_api" && !executionSupport.hostedApiAvailable) ||
+                !executionModeAvailable(executionMode, executionSupport) ||
                 (createPath === "quick" && !specText.trim())
               }
               onClick={createPath === "guided" ? handleGuidedSubmit : handleSubmit}
@@ -892,11 +892,18 @@ export function ProjectCreateForm({
               </div>
               <div className="rounded-[22px] border border-white/8 bg-white/4 p-4">
                 <p className="font-semibold text-[var(--color-ink)]">Default mode</p>
-                <p className="mt-2">{modeLabel(initialExecutionMode)}</p>
+                <p className="mt-2">{executionModeLabel(initialExecutionMode)}</p>
               </div>
               <div className="rounded-[22px] border border-white/8 bg-white/4 p-4">
                 <p className="font-semibold text-[var(--color-ink)]">Research provider</p>
-                <p className="mt-2">{appSettings.defaultResearchProvider}</p>
+                <p className="mt-2">{researchProviderLabel(savedDefaultResearchProvider)}</p>
+                {!storedDefaultResearchProviderAvailable ? (
+                  <p className="mt-2 text-xs leading-6 text-[var(--color-muted)]">
+                    {savedDefaultResearchProvider !== appSettings.defaultResearchProvider
+                      ? `Saved default ${researchProviderLabel(appSettings.defaultResearchProvider)} is unavailable on this machine, so new projects start with ${researchProviderLabel(savedDefaultResearchProvider)}.`
+                      : `Saved default ${researchProviderLabel(appSettings.defaultResearchProvider)} is unavailable on this machine, so guided research stays blocked until it becomes available.`}
+                  </p>
+                ) : null}
               </div>
             </div>
           </div>

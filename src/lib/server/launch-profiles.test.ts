@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { detectOperationalProfiles } from "@/lib/server/launch-profiles";
@@ -37,14 +37,22 @@ function makeProject(repoSource: string): ProjectRecord {
   };
 }
 
+function makeExecutable(filePath: string, content: string) {
+  writeFileSync(filePath, content, "utf8");
+  chmodSync(filePath, 0o755);
+}
+
 describe("detectOperationalProfiles", () => {
+  const originalEnv = { ...process.env };
   let repoRoot = "";
 
   beforeEach(() => {
     repoRoot = mkdtempSync(path.join(tmpdir(), "overture-launch-profiles-"));
+    process.env = { ...originalEnv };
   });
 
   afterEach(() => {
+    process.env = { ...originalEnv };
     rmSync(repoRoot, { recursive: true, force: true });
   });
 
@@ -77,7 +85,13 @@ describe("detectOperationalProfiles", () => {
     );
   });
 
-  it("exposes cloud deploy targets when deploy.sh and the cloud infra assets are present", () => {
+  it("exposes cloud deploy targets but marks them unavailable when local prerequisites are missing", () => {
+    process.env.PATH = "";
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.AZURE_RESOURCE_GROUP;
+    delete process.env.AWS_REGION;
+    delete process.env.AWS_DEFAULT_REGION;
+
     mkdirSync(path.join(repoRoot, "infra", "aws"), { recursive: true });
     writeFileSync(path.join(repoRoot, "infra", "aws", "template.yaml"), "Resources: {}\n", "utf8");
     mkdirSync(path.join(repoRoot, "infra", "azure"), { recursive: true });
@@ -85,12 +99,123 @@ describe("detectOperationalProfiles", () => {
     writeFileSync(path.join(repoRoot, "deploy.sh"), "#!/usr/bin/env bash\n", "utf8");
 
     const detected = detectOperationalProfiles(makeProject(repoRoot));
+    const awsDeploy = detected.deployProfiles.find((profile) => profile.target === "aws");
+    const azureDeploy = detected.deployProfiles.find((profile) => profile.target === "azure");
 
-    expect(detected.deployProfiles.find((profile) => profile.target === "aws")?.command).toBe(
-      "bash deploy.sh aws",
+    expect(awsDeploy?.command).toBe("bash deploy.sh aws");
+    expect(awsDeploy?.metadata.unavailableReason).toContain("AWS CLI (`aws`) was not found on PATH.");
+    expect(azureDeploy?.command).toBe("bash deploy.sh azure");
+    expect(azureDeploy?.metadata.unavailableReason).toContain("Azure CLI (`az`) was not found on PATH.");
+  });
+
+  it("uses AWS CLI config for region detection and requires docker buildx specifically", () => {
+    const binRoot = path.join(repoRoot, "bin");
+    mkdirSync(binRoot, { recursive: true });
+    makeExecutable(
+      path.join(binRoot, "aws"),
+      `#!/bin/sh
+if [ "$1" = "configure" ] && [ "$2" = "get" ] && [ "$3" = "region" ]; then
+  echo "us-west-2"
+  exit 0
+fi
+exit 0
+`,
     );
-    expect(detected.deployProfiles.find((profile) => profile.target === "azure")?.command).toBe(
-      "bash deploy.sh azure",
+    makeExecutable(
+      path.join(binRoot, "docker"),
+      `#!/bin/sh
+if [ "$1" = "buildx" ] && [ "$2" = "version" ]; then
+  exit 1
+fi
+exit 0
+`,
+    );
+    makeExecutable(path.join(binRoot, "curl"), "#!/bin/sh\nexit 0\n");
+    process.env.PATH = binRoot;
+    process.env.OPENAI_API_KEY = "sk-live-test";
+    delete process.env.AWS_REGION;
+    delete process.env.AWS_DEFAULT_REGION;
+
+    mkdirSync(path.join(repoRoot, "infra", "aws"), { recursive: true });
+    writeFileSync(path.join(repoRoot, "infra", "aws", "template.yaml"), "Resources: {}\n", "utf8");
+    writeFileSync(path.join(repoRoot, "deploy.sh"), "#!/usr/bin/env bash\n", "utf8");
+
+    const detected = detectOperationalProfiles(makeProject(repoRoot));
+    const awsDeploy = detected.deployProfiles.find((profile) => profile.target === "aws");
+
+    expect(awsDeploy?.metadata.unavailableReason).toContain("Docker buildx is required");
+    expect(awsDeploy?.metadata.unavailableReason).not.toContain("AWS region was not found");
+  });
+
+  it("checks Azure login by calling az account show", () => {
+    const binRoot = path.join(repoRoot, "bin");
+    const sshKeyPath = path.join(repoRoot, "id_ed25519.pub");
+    mkdirSync(binRoot, { recursive: true });
+    makeExecutable(
+      path.join(binRoot, "az"),
+      `#!/bin/sh
+if [ "$1" = "account" ] && [ "$2" = "show" ]; then
+  exit 0
+fi
+exit 0
+`,
+    );
+    makeExecutable(path.join(binRoot, "curl"), "#!/bin/sh\nexit 0\n");
+    process.env.PATH = binRoot;
+    process.env.OPENAI_API_KEY = "sk-live-test";
+    process.env.AZURE_RESOURCE_GROUP = "overture-rg";
+    process.env.AZURE_SSH_PUBLIC_KEY_FILE = sshKeyPath;
+    writeFileSync(sshKeyPath, "ssh-ed25519 AAAATEST overture@test\n", "utf8");
+
+    mkdirSync(path.join(repoRoot, "infra", "azure"), { recursive: true });
+    writeFileSync(path.join(repoRoot, "infra", "azure", "main.bicep"), "param foo string\n", "utf8");
+    writeFileSync(path.join(repoRoot, "deploy.sh"), "#!/usr/bin/env bash\n", "utf8");
+
+    const detected = detectOperationalProfiles(makeProject(repoRoot));
+    const azureDeploy = detected.deployProfiles.find((profile) => profile.target === "azure");
+
+    expect(azureDeploy?.metadata.unavailableReason).toBeUndefined();
+    expect(azureDeploy?.metadata.availability).toBe("ready");
+  });
+
+  it("marks AWS deploys unavailable when credentials are missing even if the CLI and region exist", () => {
+    const binRoot = path.join(repoRoot, "bin");
+    mkdirSync(binRoot, { recursive: true });
+    makeExecutable(
+      path.join(binRoot, "aws"),
+      `#!/bin/sh
+if [ "$1" = "configure" ] && [ "$2" = "get" ] && [ "$3" = "region" ]; then
+  echo "us-west-2"
+  exit 0
+fi
+if [ "$1" = "sts" ] && [ "$2" = "get-caller-identity" ]; then
+  exit 255
+fi
+exit 0
+`,
+    );
+    makeExecutable(
+      path.join(binRoot, "docker"),
+      `#!/bin/sh
+if [ "$1" = "buildx" ] && [ "$2" = "version" ]; then
+  exit 0
+fi
+exit 0
+`,
+    );
+    makeExecutable(path.join(binRoot, "curl"), "#!/bin/sh\nexit 0\n");
+    process.env.PATH = binRoot;
+    process.env.OPENAI_API_KEY = "sk-live-test";
+
+    mkdirSync(path.join(repoRoot, "infra", "aws"), { recursive: true });
+    writeFileSync(path.join(repoRoot, "infra", "aws", "template.yaml"), "Resources: {}\n", "utf8");
+    writeFileSync(path.join(repoRoot, "deploy.sh"), "#!/usr/bin/env bash\n", "utf8");
+
+    const detected = detectOperationalProfiles(makeProject(repoRoot));
+    const awsDeploy = detected.deployProfiles.find((profile) => profile.target === "aws");
+
+    expect(awsDeploy?.metadata.unavailableReason).toContain(
+      "`aws sts get-caller-identity` did not find usable credentials.",
     );
   });
 

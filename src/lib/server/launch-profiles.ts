@@ -1,4 +1,6 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { accessSync, constants as fsConstants, existsSync, readdirSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 import { normalizeRepoSource } from "@/lib/server/runtime-config";
 import type {
@@ -17,6 +19,173 @@ type DraftDeployProfile = Omit<
 >;
 
 type PackageManager = "npm" | "pnpm" | "yarn" | "bun";
+
+function isExecutable(filePath: string) {
+  try {
+    accessSync(filePath, fsConstants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function commandExists(commandName: string) {
+  const pathValue = process.env.PATH ?? "";
+
+  return pathValue
+    .split(path.delimiter)
+    .filter(Boolean)
+    .some((directory) => {
+      const candidate = path.join(directory, commandName);
+      return existsSync(candidate) && isExecutable(candidate);
+    });
+}
+
+function defaultAzureSshPublicKeyPath() {
+  const configured = process.env.AZURE_SSH_PUBLIC_KEY_FILE?.trim();
+
+  if (configured) {
+    return path.resolve(configured);
+  }
+
+  const homeDirectory = homedir();
+  const candidates = [
+    path.join(homeDirectory, ".ssh", "id_ed25519.pub"),
+    path.join(homeDirectory, ".ssh", "id_rsa.pub"),
+  ];
+
+  return candidates.find((candidate) => existsSync(candidate)) ?? null;
+}
+
+function configuredAwsRegion() {
+  const explicit = process.env.AWS_REGION?.trim() || process.env.AWS_DEFAULT_REGION?.trim();
+
+  if (explicit) {
+    return explicit;
+  }
+
+  if (!commandExists("aws")) {
+    return null;
+  }
+
+  const probe = spawnSync("aws", ["configure", "get", "region"], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      AWS_PAGER: "",
+    },
+    timeout: 2000,
+  });
+
+  return probe.status === 0 ? probe.stdout?.trim() || null : null;
+}
+
+function cloudCommandSucceeds(command: string, args: string[]) {
+  if (!commandExists(command)) {
+    return false;
+  }
+
+  const probe = spawnSync(command, args, {
+    stdio: "ignore",
+    env: {
+      ...process.env,
+      AWS_PAGER: "",
+    },
+    timeout: 4000,
+  });
+
+  return probe.status === 0;
+}
+
+function dockerBuildxAvailable() {
+  return cloudCommandSucceeds("docker", ["buildx", "version"]);
+}
+
+function awsCredentialsAvailable(region: string) {
+  return cloudCommandSucceeds("aws", [
+    "sts",
+    "get-caller-identity",
+    "--region",
+    region,
+    "--query",
+    "Account",
+    "-o",
+    "text",
+  ]);
+}
+
+function azureLoginAvailable() {
+  return cloudCommandSucceeds("az", ["account", "show"]);
+}
+
+function cloudDeployAvailabilityIssues(target: DraftDeployProfile["target"]) {
+  const issues: string[] = [];
+
+  switch (target) {
+    case "azure": {
+      if (!process.env.OPENAI_API_KEY?.trim()) {
+        issues.push("OPENAI_API_KEY must be present in the Overture process environment.");
+      }
+
+      if (!commandExists("az")) {
+        issues.push("Azure CLI (`az`) was not found on PATH.");
+      }
+
+      if (!commandExists("curl")) {
+        issues.push("curl is required because deploy.sh uses it for Azure health checks.");
+      }
+
+      if (!process.env.AZURE_RESOURCE_GROUP?.trim()) {
+        issues.push("AZURE_RESOURCE_GROUP must be set before Overture can run the Azure deploy.");
+      }
+
+      if (commandExists("az") && !azureLoginAvailable()) {
+        issues.push("Azure CLI is installed, but `az account show` did not find an active login.");
+      }
+
+      if (!defaultAzureSshPublicKeyPath()) {
+        issues.push(
+          "AZURE_SSH_PUBLIC_KEY_FILE or a default SSH public key under ~/.ssh is required.",
+        );
+      }
+
+      return issues;
+    }
+    case "aws": {
+      const region = configuredAwsRegion();
+
+      if (!process.env.OPENAI_API_KEY?.trim()) {
+        issues.push("OPENAI_API_KEY must be present in the Overture process environment.");
+      }
+
+      if (!commandExists("aws")) {
+        issues.push("AWS CLI (`aws`) was not found on PATH.");
+      }
+
+      if (!commandExists("curl")) {
+        issues.push("curl is required because deploy.sh uses it for AWS health checks.");
+      }
+
+      if (!commandExists("docker")) {
+        issues.push("Docker CLI is required because the AWS deploy builds and pushes the image locally.");
+      } else if (!dockerBuildxAvailable()) {
+        issues.push("Docker buildx is required because the AWS deploy builds and pushes the image locally.");
+      }
+
+      if (!region) {
+        issues.push("AWS region was not found in env vars or AWS CLI config.");
+      } else if (commandExists("aws") && !awsCredentialsAvailable(region)) {
+        issues.push(
+          "AWS CLI is installed, but `aws sts get-caller-identity` did not find usable credentials.",
+        );
+      }
+
+      return issues;
+    }
+    default:
+      return issues;
+  }
+}
 
 function readPackageJson(repoRoot: string) {
   const packageJsonPath = path.join(repoRoot, "package.json");
@@ -275,6 +444,8 @@ export function detectOperationalProfiles(project: ProjectRecord) {
       continue;
     }
 
+    const availabilityIssues = cloudDeployAvailabilityIssues(target);
+
     deployProfiles.push({
       target,
       label,
@@ -290,6 +461,15 @@ export function detectOperationalProfiles(project: ProjectRecord) {
                 : `${configuredHealthUrl.replace(/\/$/, "")}/api/health`,
             }
           : {}),
+        ...(availabilityIssues.length
+          ? {
+              availability: "unavailable",
+              unavailableReason: availabilityIssues.join(" "),
+              prerequisiteIssues: availabilityIssues,
+            }
+          : {
+              availability: "ready",
+            }),
       },
     });
   }

@@ -114,6 +114,18 @@ function asArray(value: unknown) {
   return Array.isArray(value) ? value : [];
 }
 
+function profileUnavailableReason(metadata: Record<string, unknown>) {
+  return typeof metadata.unavailableReason === "string" ? metadata.unavailableReason : null;
+}
+
+function launchRunCanStop(run: ProjectSnapshot["launchRuns"][number]) {
+  return (
+    typeof run.metadata.pid === "number" &&
+    run.metadata.pid > 0 &&
+    typeof run.metadata.processStoppedAt !== "string"
+  );
+}
+
 function launchTargetLabel(target: LaunchTarget) {
   switch (target) {
     case "api":
@@ -167,6 +179,7 @@ export function ProjectPipelineShell({
   const [planBusy, setPlanBusy] = useState(false);
   const [researchReport, setResearchReport] = useState(initialResearchReport);
   const [launchBusyId, setLaunchBusyId] = useState<string | null>(null);
+  const [launchStopBusyId, setLaunchStopBusyId] = useState<string | null>(null);
   const [launchError, setLaunchError] = useState<string | null>(null);
   const [deployBusyId, setDeployBusyId] = useState<string | null>(null);
   const [deployError, setDeployError] = useState<string | null>(null);
@@ -496,6 +509,38 @@ export function ProjectPipelineShell({
         );
       } finally {
         setLaunchBusyId(null);
+      }
+    });
+  }
+
+  function stopLaunch(launchRunId: string) {
+    setLaunchStopBusyId(launchRunId);
+    setLaunchError(null);
+
+    startTransition(async () => {
+      try {
+        const response = await fetch(`/api/projects/${snapshot.project.id}/launch`, {
+          method: "DELETE",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            launchRunId,
+          }),
+        });
+        const payload = (await response.json().catch(() => ({}))) as { error?: string };
+
+        if (!response.ok) {
+          throw new Error(payload.error ?? "Unable to stop the launch process.");
+        }
+
+        await refreshSnapshot();
+      } catch (error) {
+        setLaunchError(
+          error instanceof Error ? error.message : "Unable to stop the launch process.",
+        );
+      } finally {
+        setLaunchStopBusyId(null);
       }
     });
   }
@@ -1111,6 +1156,11 @@ export function ProjectPipelineShell({
                         key={profile.id}
                         className="rounded-[24px] border border-white/8 bg-white/4 p-5"
                       >
+                        {profileUnavailableReason(profile.metadata) ? (
+                          <div className="mb-4 rounded-[18px] border border-amber-300/20 bg-amber-400/8 p-3 text-xs leading-6 text-amber-100/85">
+                            {profileUnavailableReason(profile.metadata)}
+                          </div>
+                        ) : null}
                         <div className="flex items-start justify-between gap-3">
                           <div>
                             <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--color-accent)]">
@@ -1136,7 +1186,10 @@ export function ProjectPipelineShell({
                         <button
                           type="button"
                           onClick={() => runLaunch(profile.id)}
-                          disabled={launchBusyId === profile.id}
+                          disabled={
+                            launchBusyId === profile.id ||
+                            Boolean(profileUnavailableReason(profile.metadata))
+                          }
                           className="glass-button mt-4 inline-flex items-center gap-2 rounded-full px-5 py-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           {launchBusyId === profile.id ? (
@@ -1168,6 +1221,11 @@ export function ProjectPipelineShell({
                         key={profile.id}
                         className="rounded-[24px] border border-amber-300/15 bg-amber-400/5 p-5"
                       >
+                        {profileUnavailableReason(profile.metadata) ? (
+                          <div className="mb-4 rounded-[18px] border border-amber-300/20 bg-amber-400/8 p-3 text-xs leading-6 text-amber-100/85">
+                            {profileUnavailableReason(profile.metadata)}
+                          </div>
+                        ) : null}
                         <div className="flex items-start justify-between gap-3">
                           <div>
                             <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--color-accent)]">
@@ -1196,7 +1254,10 @@ export function ProjectPipelineShell({
                         <button
                           type="button"
                           onClick={() => runLaunch(profile.id)}
-                          disabled={launchBusyId === profile.id}
+                          disabled={
+                            launchBusyId === profile.id ||
+                            Boolean(profileUnavailableReason(profile.metadata))
+                          }
                           className="glass-button mt-4 inline-flex items-center gap-2 rounded-full px-5 py-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           {launchBusyId === profile.id ? (
@@ -1238,8 +1299,25 @@ export function ProjectPipelineShell({
                           <p className="mt-2 text-xs text-[var(--color-muted)]">
                             Started {formatDateTime(run.startedAt)}
                           </p>
+                          {typeof run.metadata.processStoppedAt === "string" ? (
+                            <p className="mt-2 text-xs text-[var(--color-muted)]">
+                              Process stopped {formatDateTime(run.metadata.processStoppedAt)}
+                            </p>
+                          ) : null}
                         </div>
-                        <StatusPill status={run.status} />
+                        <div className="flex items-center gap-2">
+                          {launchRunCanStop(run) ? (
+                            <button
+                              type="button"
+                              onClick={() => stopLaunch(run.id)}
+                              disabled={launchStopBusyId === run.id}
+                              className="rounded-full border border-[var(--color-border)] bg-white/6 px-3 py-2 text-xs font-semibold text-[var(--color-ink)] transition hover:border-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {launchStopBusyId === run.id ? "Stopping..." : "Stop process"}
+                            </button>
+                          ) : null}
+                          <StatusPill status={run.status} />
+                        </div>
                       </div>
                     </div>
                   ))
@@ -1298,6 +1376,11 @@ export function ProjectPipelineShell({
                         key={profile.id}
                         className="rounded-[24px] border border-white/8 bg-white/4 p-5"
                       >
+                        {profileUnavailableReason(profile.metadata) ? (
+                          <div className="mb-4 rounded-[18px] border border-amber-300/20 bg-amber-400/8 p-3 text-xs leading-6 text-amber-100/85">
+                            {profileUnavailableReason(profile.metadata)}
+                          </div>
+                        ) : null}
                         <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--color-accent)]">
                           {deployTargetLabel(profile.target)}
                         </p>
@@ -1315,7 +1398,10 @@ export function ProjectPipelineShell({
                         <button
                           type="button"
                           onClick={() => runDeploy(profile.id, profile.approvalRequired)}
-                          disabled={deployBusyId === profile.id}
+                          disabled={
+                            deployBusyId === profile.id ||
+                            Boolean(profileUnavailableReason(profile.metadata))
+                          }
                           className="glass-button mt-4 inline-flex items-center gap-2 rounded-full px-5 py-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           {deployBusyId === profile.id ? (
@@ -1346,6 +1432,11 @@ export function ProjectPipelineShell({
                         key={profile.id}
                         className="rounded-[24px] border border-amber-300/15 bg-amber-400/5 p-5"
                       >
+                        {profileUnavailableReason(profile.metadata) ? (
+                          <div className="mb-4 rounded-[18px] border border-amber-300/20 bg-amber-400/8 p-3 text-xs leading-6 text-amber-100/85">
+                            {profileUnavailableReason(profile.metadata)}
+                          </div>
+                        ) : null}
                         <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--color-accent)]">
                           {deployTargetLabel(profile.target)}
                         </p>
@@ -1361,7 +1452,10 @@ export function ProjectPipelineShell({
                         <button
                           type="button"
                           onClick={() => runDeploy(profile.id, profile.approvalRequired)}
-                          disabled={deployBusyId === profile.id}
+                          disabled={
+                            deployBusyId === profile.id ||
+                            Boolean(profileUnavailableReason(profile.metadata))
+                          }
                           className="glass-button mt-4 inline-flex items-center gap-2 rounded-full px-5 py-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           {deployBusyId === profile.id ? (

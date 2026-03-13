@@ -23,6 +23,7 @@ import {
   hydrateStoredProjectTokenUsage,
 } from "@/lib/server/project-token-usage";
 import {
+  assertExecutionModeAvailable,
   assertResearchProviderAvailable,
   normalizeRepoSource,
   resolveAvailableResearchProvider,
@@ -1270,14 +1271,14 @@ function resolveProjectDefaults(
     | CreateProjectInput,
   appSettings = getAppSettings(),
 ) {
+  assertExecutionModeAvailable(input.executionMode);
+
   const researchProvider =
     input.researchProvider === undefined
       ? resolveAvailableResearchProvider(appSettings.defaultResearchProvider)
       : normalizeResearchProvider(input.researchProvider);
 
-  if (input.researchProvider !== undefined) {
-    assertResearchProviderAvailable(researchProvider);
-  }
+  assertResearchProviderAvailable(researchProvider);
 
   const plannerModel =
     input.plannerModel === undefined
@@ -2027,6 +2028,35 @@ export function completeLaunchRunRecord(input: {
   });
 }
 
+export function markLaunchRunProcessStopped(input: {
+  launchRunId: string;
+  projectId: string;
+  summary: string;
+  metadata: Record<string, unknown>;
+}) {
+  const db = getDb();
+  const timestamp = nowIso();
+
+  db.prepare(
+    `
+      UPDATE launch_runs
+      SET summary = ?, metadata_json = ?, completed_at = COALESCE(completed_at, ?)
+      WHERE id = ?
+    `,
+  ).run(input.summary, serialise(input.metadata), timestamp, input.launchRunId);
+
+  appendAuditEvent({
+    projectId: input.projectId,
+    actor: "launch",
+    action: "launch.process_stopped",
+    detail: input.summary,
+    payload: {
+      launchRunId: input.launchRunId,
+      ...input.metadata,
+    },
+  });
+}
+
 export function failLaunchRunRecord(input: {
   launchRunId: string;
   projectId: string;
@@ -2618,6 +2648,10 @@ export function updateProjectSettings(
   const nextResearchProvider = normalizeResearchProvider(
     updates.researchProvider ?? current.researchProvider,
   );
+
+  if (updates.executionMode !== undefined) {
+    assertExecutionModeAvailable(nextExecutionMode);
+  }
 
   if (updates.researchProvider !== undefined) {
     assertResearchProviderAvailable(nextResearchProvider);

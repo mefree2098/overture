@@ -87,6 +87,24 @@ describe("runtime-config", () => {
     expect(support.researchProviderAvailability.openaiResponsesAvailable).toBe(true);
   });
 
+  it("rejects codex_native research when neither Codex auth path is usable", async () => {
+    rmSync(process.env.OVERTURE_CODEX_BIN!, { force: true });
+
+    const runtimeConfig = await import("@/lib/server/runtime-config");
+
+    expect(() => runtimeConfig.assertResearchProviderAvailable("codex_native")).toThrow(
+      "Codex native research requires Codex CLI plus a usable ChatGPT or API-key Codex login.",
+    );
+  });
+
+  it("rejects hosted_api execution mode when hosted auth is unavailable", async () => {
+    const runtimeConfig = await import("@/lib/server/runtime-config");
+
+    expect(() => runtimeConfig.assertExecutionModeAvailable("hosted_api")).toThrow(
+      "Hosted API execution mode requires OPENAI_API_KEY or Codex API auth.",
+    );
+  });
+
   it("maps the legacy default repo source to the current workspace root", async () => {
     const runtimeConfig = await import("@/lib/server/runtime-config");
 

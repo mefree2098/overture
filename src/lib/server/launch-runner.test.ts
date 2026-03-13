@@ -20,6 +20,7 @@ describe("launch runner failure evidence", () => {
     rmSync(runtimeRoot, { recursive: true, force: true });
     vi.resetModules();
     vi.clearAllMocks();
+    vi.restoreAllMocks();
   });
 
   it("writes launch report, log, and diagnostics artifacts when a docker launch fails", async () => {
@@ -98,6 +99,68 @@ describe("launch runner failure evidence", () => {
     expect(failLaunchRunRecord).toHaveBeenCalledWith(
       expect.objectContaining({
         launchRunId: "launch-run-1",
+      }),
+    );
+  });
+
+  it("stops a managed launch process and records that the process was stopped", async () => {
+    const markLaunchRunProcessStopped = vi.fn();
+    vi.spyOn(process, "kill").mockImplementation(() => true);
+
+    vi.doMock("@/lib/server/repository", () => ({
+      refreshOperationalProfiles: vi.fn(),
+      getProjectSnapshot: vi.fn(() => ({
+        project: {
+          id: "project-1",
+          slug: "project-slug",
+          name: "Project",
+        },
+        launchProfiles: [],
+        launchRuns: [
+          {
+            id: "launch-run-2",
+            projectId: "project-1",
+            launchProfileId: "launch-web",
+            status: "completed",
+            summary: "Launch succeeded",
+            logPath: "/tmp/launch.log",
+            metadata: {
+              pid: 4242,
+            },
+            startedAt: new Date().toISOString(),
+            completedAt: new Date().toISOString(),
+          },
+        ],
+      })),
+      createLaunchRunRecord: vi.fn(),
+      completeLaunchRunRecord: vi.fn(),
+      failLaunchRunRecord: vi.fn(),
+      markLaunchRunProcessStopped,
+      writeArtifact: vi.fn(),
+    }));
+
+    const { stopProjectLaunchProcess } = await import("@/lib/server/launch-runner");
+
+    await expect(
+      stopProjectLaunchProcess({
+        projectId: "project-1",
+        launchRunId: "launch-run-2",
+      }),
+    ).resolves.toEqual({
+      launchRunId: "launch-run-2",
+      summary: "Stopped the managed launch process.",
+    });
+
+    expect(process.kill).toHaveBeenCalledWith(4242, 0);
+    expect(process.kill).toHaveBeenCalledWith(-4242, "SIGTERM");
+    expect(markLaunchRunProcessStopped).toHaveBeenCalledWith(
+      expect.objectContaining({
+        launchRunId: "launch-run-2",
+        summary: "Stopped the managed launch process.",
+        metadata: expect.objectContaining({
+          pid: 4242,
+          processStoppedAt: expect.any(String),
+        }),
       }),
     );
   });
